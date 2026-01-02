@@ -15,6 +15,7 @@
 #include "utils/Geometry.h" // for CRect/CPoint
 #include "utils/TransformMatrix.h" // for the members m_guiTransform etc.
 
+#include <array>
 #include <map>
 #include <stack>
 #include <string>
@@ -205,6 +206,12 @@ public:
   void RestoreClipRegion();
   void ClipRect(CRect &vertex, CRect &texture, CRect *diffuse = NULL);
   CRect GetClipRegion();
+  bool SetClipRegionScissor(float x, float y, float w, float h);
+  void RestoreClipRegionScissor();
+  bool BeginOffscreenRoundedGroup(float x, float y, float w, float h, float radiusGui);
+  bool BeginOffscreenRoundedGroup(float x, float y, float w, float h, const std::array<float, 4>& radiiGui);
+  void EndOffscreenRoundedGroup();
+
   void AddGUITransform();
   TransformMatrix AddTransform(const TransformMatrix &matrix);
   void SetTransform(const TransformMatrix &matrix);
@@ -245,6 +252,7 @@ protected:
   std::stack<CPoint> m_cameras;
   std::stack<CPoint> m_origins;
   std::stack<CRect> m_clipRegions;
+  std::stack<CRect> m_scissorRegions;
   std::stack<float> m_stereoFactors;
   std::stack<CRect> m_viewStack;
   CRect m_scissors;

@@ -14,7 +14,7 @@
 */
 
 #include "GUIControlLookup.h"
-
+#include <array>
 #include <vector>
 
 /*!
@@ -69,9 +69,20 @@ public:
   }
   void SetRenderFocusedLast(bool renderLast) { m_renderFocusedLast = renderLast; }
 
+  // Clip children to this group's bounds using render-space scissor rectangles.
+  // This constrains both static rendering and animated transforms.
+  void SetClipping(bool clip) { m_clipping = clip; }
+  // Optional rounded clipping radii (in screen pixels): tl,tr,br,bl. 0 disables offscreen clipping.
+  void SetCornerRadius(float radius) { m_cornerRadii = {radius, radius, radius, radius}; }
+  void SetCornerRadii(const std::array<float, 4>& radii) { m_cornerRadii = radii; }
+  void SetTransformChildren(bool transform) { m_transformChildren = transform; }
   void SaveStates(std::vector<CControlState> &states) override;
 
   bool IsGroup() const override { return true; }
+  bool TransformChildren() const override { return m_transformChildren; }
+  bool m_clipping{false};
+  std::array<float, 4> m_cornerRadii{0.0f, 0.0f, 0.0f, 0.0f};
+  bool m_transformChildren{true};
 
 #ifdef _DEBUG
   void DumpTextureUse() override;
