@@ -108,6 +108,9 @@ void CGUIControlGroup::Process(unsigned int currentTime, CDirtyRegionList &dirty
 void CGUIControlGroup::Render()
 {
   CPoint pos(GetPosition());
+  const bool clipped =
+    m_clipping && CServiceBroker::GetWinSystem()->GetGfxContext().SetClipRegionScissor(
+                      pos.x, pos.y, m_width, m_height);
   CServiceBroker::GetWinSystem()->GetGfxContext().SetOrigin(pos.x, pos.y);
   CGUIControl *focusedControl = NULL;
   if (CServiceBroker::GetWinSystem()->GetGfxContext().GetRenderOrder() ==
@@ -135,13 +138,28 @@ void CGUIControlGroup::Render()
     focusedControl->DoRender();
   CGUIControl::Render();
   CServiceBroker::GetWinSystem()->GetGfxContext().RestoreOrigin();
+  if (clipped)
+    CServiceBroker::GetWinSystem()->GetGfxContext().RestoreClipRegionScissor();
 }
 
 void CGUIControlGroup::RenderEx()
 {
+  CPoint pos(GetPosition());
+
+  const bool clipped =
+      m_clipping && CServiceBroker::GetWinSystem()->GetGfxContext().SetClipRegionScissor(
+                        pos.x, pos.y, m_width, m_height);
+
+  CServiceBroker::GetWinSystem()->GetGfxContext().SetOrigin(pos.x, pos.y);
+
   for (auto *control : m_children)
     control->RenderEx();
   CGUIControl::RenderEx();
+
+  CServiceBroker::GetWinSystem()->GetGfxContext().RestoreOrigin();
+
+  if (clipped)
+    CServiceBroker::GetWinSystem()->GetGfxContext().RestoreClipRegionScissor();
 }
 
 bool CGUIControlGroup::OnAction(const CAction &action)
