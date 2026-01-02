@@ -84,6 +84,63 @@ void CGraphicContext::RestoreClipRegion()
   // here we could reset the hardware clipping, if applicable
 }
 
+bool CGraphicContext::SetClipRegionScissor(float x, float y, float w, float h)
+{
+  if (w <= 0.0f || h <= 0.0f)
+    return false;
+
+  // NOTE:
+  // Scissors are maintained in FINAL (render) coordinates to avoid double-applying
+  // origin translations (origins are already included in the current transform matrix).
+  const CRect rect(x, y, x + w, y + h);
+
+  CRect scissorFinal;
+  scissorFinal.x1 = ScaleFinalXCoord(rect.x1, rect.y1);
+  scissorFinal.y1 = ScaleFinalYCoord(rect.x1, rect.y1);
+  scissorFinal.x2 = ScaleFinalXCoord(rect.x2, rect.y2);
+  scissorFinal.y2 = ScaleFinalYCoord(rect.x2, rect.y2);
+
+  if (scissorFinal.x2 < scissorFinal.x1)
+    std::swap(scissorFinal.x1, scissorFinal.x2);
+  if (scissorFinal.y2 < scissorFinal.y1)
+    std::swap(scissorFinal.y1, scissorFinal.y2);
+
+  if (scissorFinal.IsEmpty())
+    return false;
+
+  if (!m_scissorRegions.empty())
+  {
+    scissorFinal.Intersect(m_scissorRegions.top());
+
+    if (scissorFinal.x2 < scissorFinal.x1)
+      std::swap(scissorFinal.x1, scissorFinal.x2);
+    if (scissorFinal.y2 < scissorFinal.y1)
+      std::swap(scissorFinal.y1, scissorFinal.y2);
+
+    if (scissorFinal.IsEmpty())
+      return false;
+  }
+
+  m_scissorRegions.push(scissorFinal);
+  SetScissors(scissorFinal);
+  return true;
+}
+
+void CGraphicContext::RestoreClipRegionScissor()
+{
+  if (!m_scissorRegions.empty())
+    m_scissorRegions.pop();
+
+  if (m_scissorRegions.empty())
+  {
+    ResetScissors();
+    return;
+  }
+
+  SetScissors(m_scissorRegions.top());
+}
+
+
 void CGraphicContext::ClipRect(CRect &vertex, CRect &texture, CRect *texture2)
 {
   // this is the software clipping routine.  If the graphics hardware is set to do the clipping

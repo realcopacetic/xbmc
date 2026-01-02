@@ -69,9 +69,13 @@ public:
   }
   void SetRenderFocusedLast(bool renderLast) { m_renderFocusedLast = renderLast; }
 
+  // Clip children to this group's bounds using render-space scissor rectangles.
+  // This constrains both static rendering and animated transforms.
+  void SetClipping(bool clip) { m_clipping = clip; }
   void SaveStates(std::vector<CControlState> &states) override;
 
   bool IsGroup() const override { return true; }
+  bool m_clipping{false};
 
 #ifdef _DEBUG
   void DumpTextureUse() override;

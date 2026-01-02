@@ -907,6 +907,7 @@ CGUIControl* CGUIControlFactory::Create(int parentID,
   int rulerUnit = 12;
   bool useControlCoords = false;
   bool renderFocusedLast = false;
+  bool clipping = false;
 
   CRect hitRect;
   CPoint camera;
@@ -1170,6 +1171,7 @@ CGUIControl* CGUIControlFactory::Create(int parentID,
   XMLUtils::GetBoolean(pControlNode, "usecontrolcoords", useControlCoords);
   XMLUtils::GetBoolean(pControlNode, "renderfocusedlast", renderFocusedLast);
   XMLUtils::GetBoolean(pControlNode, "resetonlabelchange", resetOnLabelChange);
+  XMLUtils::GetBoolean(pControlNode, "clipping", clipping);
 
   XMLUtils::GetBoolean(pControlNode, "password", bPassword);
 
@@ -1257,6 +1259,7 @@ CGUIControl* CGUIControlFactory::Create(int parentID,
         control = new CGUIControlGroup(parentID, id, posX, posY, width, height);
         static_cast<CGUIControlGroup*>(control)->SetDefaultControl(defaultControl, defaultAlways);
         static_cast<CGUIControlGroup*>(control)->SetRenderFocusedLast(renderFocusedLast);
+        static_cast<CGUIControlGroup*>(control)->SetClipping(clipping);
       }
       break;
     }
