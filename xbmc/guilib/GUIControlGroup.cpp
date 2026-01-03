@@ -43,6 +43,7 @@ CGUIControlGroup::CGUIControlGroup(const CGUIControlGroup &from)
   m_defaultControl = from.m_defaultControl;
   m_defaultAlways = from.m_defaultAlways;
   m_renderFocusedLast = from.m_renderFocusedLast;
+  m_transformChildren = from.m_transformChildren;
 
   // run through and add our controls
   for (auto *i : from.m_children)
@@ -409,7 +410,8 @@ EVENT_RESULT CGUIControlGroup::SendMouseEvent(const CPoint& point, const MOUSE::
 {
   // transform our position into child coordinates
   CPoint childPoint(point);
-  m_transform.InverseTransformPosition(childPoint.x, childPoint.y);
+  if (m_transformChildren)
+    m_transform.InverseTransformPosition(childPoint.x, childPoint.y);
 
   if (CGUIControl::CanFocus())
   {
@@ -436,7 +438,8 @@ EVENT_RESULT CGUIControlGroup::SendMouseEvent(const CPoint& point, const MOUSE::
 void CGUIControlGroup::UnfocusFromPoint(const CPoint &point)
 {
   CPoint controlCoords(point);
-  m_transform.InverseTransformPosition(controlCoords.x, controlCoords.y);
+  if (m_transformChildren)
+    m_transform.InverseTransformPosition(controlCoords.x, controlCoords.y);
   controlCoords -= GetPosition();
   for (auto *child : m_children)
   {
