@@ -72,10 +72,13 @@ public:
   // Clip children to this group's bounds using render-space scissor rectangles.
   // This constrains both static rendering and animated transforms.
   void SetClipping(bool clip) { m_clipping = clip; }
+  void SetTransformChildren(bool transform) { m_transformChildren = transform; }
   void SaveStates(std::vector<CControlState> &states) override;
 
   bool IsGroup() const override { return true; }
+  bool TransformChildren() const override { return m_transformChildren; }
   bool m_clipping{false};
+  bool m_transformChildren{true};
 
 #ifdef _DEBUG
   void DumpTextureUse() override;
