@@ -140,6 +140,82 @@ void CGraphicContext::RestoreClipRegionScissor()
   SetScissors(m_scissorRegions.top());
 }
 
+bool CGraphicContext::SetClipRegionStencilRect(float x, float y, float w, float h)
+{
+  if (w <= 0.0f || h <= 0.0f)
+    return false;
+
+  const CRect rect(x, y, x + w, y + h);
+
+  // Prefer backend stencil (rotation-safe). Fall back to scissor if unsupported.
+  const bool ok = CServiceBroker::GetRenderSystem()->BeginStencilClip(rect, 0.0f);
+  if (!ok)
+  {
+    const bool scissorOk = SetClipRegionScissor(x, y, w, h);
+    if (!scissorOk)
+      return false;
+    m_stencilBackend.emplace(false);
+  }
+  else
+  {
+    m_stencilBackend.emplace(true);
+  }
+
+  m_stencilRegions.push(rect);
+  m_stencilRadii.emplace(0.0f);
+  return true;
+}
+
+bool CGraphicContext::SetClipRegionStencilRounded(float x, float y, float w, float h, float radius)
+{
+  if (w <= 0.0f || h <= 0.0f)
+    return false;
+
+  // Clamp radius in screen space to half extents.
+  const float maxR = std::min(w, h) * 0.5f;
+  const float r = std::max(0.0f, std::min(radius, maxR));
+
+  const CRect rect(x, y, x + w, y + h);
+
+  // Prefer backend stencil (rotation-safe). Fall back to scissor if unsupported.
+  const bool ok = CServiceBroker::GetRenderSystem()->BeginStencilClip(rect, r);
+  if (!ok)
+  {
+    const bool scissorOk = SetClipRegionScissor(x, y, w, h);
+    if (!scissorOk)
+      return false;
+    m_stencilBackend.emplace(false);
+  }
+  else
+  {
+    m_stencilBackend.emplace(true);
+  }
+
+  m_stencilRegions.push(rect);
+  m_stencilRadii.emplace(r);
+  return true;
+}
+
+void CGraphicContext::RestoreClipRegionStencil()
+{
+  if (!m_stencilRegions.empty())
+    m_stencilRegions.pop();
+  if (!m_stencilRadii.empty())
+    m_stencilRadii.pop();
+
+  if (!m_stencilBackend.empty() && m_stencilBackend.top())
+  {
+    m_stencilBackend.pop();
+    CServiceBroker::GetRenderSystem()->EndStencilClip();
+    return;
+  }
+
+  if (!m_stencilBackend.empty())
+    m_stencilBackend.pop();
+
+  // Scissor fallback path.
+  RestoreClipRegionScissor();
+}
 
 void CGraphicContext::ClipRect(CRect &vertex, CRect &texture, CRect *texture2)
 {

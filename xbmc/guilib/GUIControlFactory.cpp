@@ -908,6 +908,7 @@ CGUIControl* CGUIControlFactory::Create(int parentID,
   bool useControlCoords = false;
   bool renderFocusedLast = false;
   bool clipping = false;
+  float cornerRadius = 0.0f;
   bool transformChildren = true;
 
   CRect hitRect;
@@ -1173,6 +1174,7 @@ CGUIControl* CGUIControlFactory::Create(int parentID,
   XMLUtils::GetBoolean(pControlNode, "renderfocusedlast", renderFocusedLast);
   XMLUtils::GetBoolean(pControlNode, "resetonlabelchange", resetOnLabelChange);
   XMLUtils::GetBoolean(pControlNode, "clipping", clipping);
+  XMLUtils::GetFloat(pControlNode, "cornerradius", cornerRadius);
   XMLUtils::GetBoolean(pControlNode, "transformchildren", transformChildren);
 
   XMLUtils::GetBoolean(pControlNode, "password", bPassword);
@@ -1251,10 +1253,14 @@ CGUIControl* CGUIControlFactory::Create(int parentID,
   switch (type)
   {
     case CGUIControl::GUICONTROL_GROUP:
+    case CGUIControl::GUICONTROL_LISTGROUP:
     {
       if (insideContainer)
       {
         control = new CGUIListGroup(parentID, id, posX, posY, width, height);
+        static_cast<CGUIControlGroup*>(control)->SetClipping(clipping);
+        static_cast<CGUIControlGroup*>(control)->SetTransformChildren(transformChildren);
+        static_cast<CGUIControlGroup*>(control)->SetCornerRadius(cornerRadius);
       }
       else
       {
@@ -1263,6 +1269,7 @@ CGUIControl* CGUIControlFactory::Create(int parentID,
         static_cast<CGUIControlGroup*>(control)->SetRenderFocusedLast(renderFocusedLast);
         static_cast<CGUIControlGroup*>(control)->SetClipping(clipping);
         static_cast<CGUIControlGroup*>(control)->SetTransformChildren(transformChildren);
+        static_cast<CGUIControlGroup*>(control)->SetCornerRadius(cornerRadius);
       }
       break;
     }

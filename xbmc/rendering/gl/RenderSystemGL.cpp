@@ -23,6 +23,7 @@
 #include "utils/log.h"
 #include "windowing/WinSystem.h"
 
+#include <cmath>
 #include <exception>
 
 #if defined(TARGET_LINUX)
@@ -788,6 +789,22 @@ void CRenderSystemGL::InitialiseShaders()
     m_pShader[ShaderMethodGL::SM_MULTI_BLENDCOLOR].reset();
     CLog::Log(LOGERROR, "GUI Shader gl_shader_frag_multi_blendcolor.glsl - compile and link failed");
   }
+
+  m_pShader[ShaderMethodGL::SM_STENCIL_ROUNDED_MASK] = std::make_unique<CGLShader>(
+      "gl_shader_vert_roundrect_mask.glsl", "gl_shader_frag_roundrect_mask.glsl", defines);
+  if (!m_pShader[ShaderMethodGL::SM_STENCIL_ROUNDED_MASK]->CompileAndLink())
+  {
+    m_pShader[ShaderMethodGL::SM_STENCIL_ROUNDED_MASK]->Free();
+    m_pShader[ShaderMethodGL::SM_STENCIL_ROUNDED_MASK].reset();
+    CLog::Log(LOGERROR, "GUI Shader gl_shader_vert_roundrect_mask.glsl  "
+                        "gl_shader_frag_roundrect_mask.glsl - compile and link failed");
+  }
+  else
+  {
+    const GLuint prog = m_pShader[ShaderMethodGL::SM_STENCIL_ROUNDED_MASK]->ProgramHandle();
+    m_maskRectLoc = glGetUniformLocation(prog, "m_maskRect");
+    m_maskRadiusLoc = glGetUniformLocation(prog, "m_radius");
+  }
 }
 
 void CRenderSystemGL::ReleaseShaders()
@@ -823,6 +840,102 @@ void CRenderSystemGL::ReleaseShaders()
   if (m_pShader[ShaderMethodGL::SM_MULTI_BLENDCOLOR])
     m_pShader[ShaderMethodGL::SM_MULTI_BLENDCOLOR]->Free();
   m_pShader[ShaderMethodGL::SM_MULTI_BLENDCOLOR].reset();
+
+  if (m_pShader[ShaderMethodGL::SM_STENCIL_ROUNDED_MASK])
+    m_pShader[ShaderMethodGL::SM_STENCIL_ROUNDED_MASK]->Free();
+  m_pShader[ShaderMethodGL::SM_STENCIL_ROUNDED_MASK].reset();
+}
+
+bool CRenderSystemGL::BeginStencilClip(const CRect& rect, float radius)
+{
+  const uint8_t nextRef = static_cast<uint8_t>(m_stencilRef + 1);
+  if (nextRef == 0)
+    return false;
+
+  // If this is the first stencil clip, clear the stencil buffer once.
+  if (m_stencilRef == 0)
+  {
+    glClearStencil(0);
+    glStencilMask(0xFF);
+    glClear(GL_STENCIL_BUFFER_BIT);
+    glStencilMask(0x00);
+  }
+
+  glEnable(GL_STENCIL_TEST);
+  glStencilMask(0xFF);
+
+  if (m_stencilRef == 0)
+    glStencilFunc(GL_ALWAYS, nextRef, 0xFF);
+  else
+    glStencilFunc(GL_EQUAL, m_stencilRef, 0xFF);
+
+  glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+
+  glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+  glDepthMask(GL_FALSE);
+
+  if (radius > 0.0f && m_pShader[ShaderMethodGL::SM_STENCIL_ROUNDED_MASK])
+  {
+    const GLfloat* model = glMatrixModview.Get();
+    const float sx = std::hypot(model[0], model[1]);
+    const float sy = std::hypot(model[4], model[5]);
+    const float s = (sx > 0.0f && sy > 0.0f) ? ((sx + sy) * 0.5f) : 1.0f;
+
+    const float w = rect.Width();
+    const float h = rect.Height();
+    const float maxR = std::min(w, h) * 0.5f;
+    const float rLocal = std::max(0.0f, std::min(radius / s, maxR));
+
+    EnableShader(ShaderMethodGL::SM_STENCIL_ROUNDED_MASK);
+    const GLint uniColLoc = ShaderGetUniCol();
+    const GLint depthLoc = ShaderGetDepth();
+
+    if (uniColLoc >= 0)
+      glUniform4f(uniColLoc, 1.0f, 1.0f, 1.0f, 1.0f);
+    if (depthLoc >= 0)
+      glUniform1f(depthLoc, 1.0f);
+
+    if (m_maskRectLoc >= 0)
+      glUniform4f(m_maskRectLoc, rect.x1, rect.y1, rect.x2, rect.y2);
+    if (m_maskRadiusLoc >= 0)
+      glUniform1f(m_maskRadiusLoc, rLocal);
+
+    CGUITextureGL::DrawQuad(rect, 0xFFFFFFFF, nullptr, nullptr, 1.0f, false);
+    DisableShader();
+  }
+  else
+  {
+    CGUITextureGL::DrawQuad(rect, 0xFFFFFFFF, nullptr, nullptr, 1.0f, false);
+  }
+
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glDepthMask(GL_TRUE);
+
+  glStencilMask(0x00);
+  glStencilFunc(GL_EQUAL, nextRef, 0xFF);
+  glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+
+  m_stencilRef = nextRef;
+  return true;
+}
+
+void CRenderSystemGL::EndStencilClip()
+{
+  if (m_stencilRef == 0)
+    return;
+
+  m_stencilRef = static_cast<uint8_t>(m_stencilRef - 1);
+  if (m_stencilRef == 0)
+  {
+    glDisable(GL_STENCIL_TEST);
+    glStencilMask(0x00);
+    return;
+  }
+
+  glEnable(GL_STENCIL_TEST);
+  glStencilMask(0x00);
+  glStencilFunc(GL_EQUAL, m_stencilRef, 0xFF);
+  glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 }
 
 void CRenderSystemGL::EnableShader(ShaderMethodGL method)

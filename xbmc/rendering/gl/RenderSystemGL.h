@@ -30,6 +30,7 @@ enum class ShaderMethodGL
   SM_FONTS_SHADER_CLIP,
   SM_TEXTURE_NOBLEND,
   SM_MULTI_BLENDCOLOR,
+  SM_STENCIL_ROUNDED_MASK,
   SM_MAX
 };
 
@@ -56,6 +57,7 @@ private:
       {ShaderMethodGL::SM_FONTS_SHADER_CLIP, "fonts with vertex shader based clipping"},
       {ShaderMethodGL::SM_TEXTURE_NOBLEND, "texture no blending"},
       {ShaderMethodGL::SM_MULTI_BLENDCOLOR, "multi blend colour"},
+      {ShaderMethodGL::SM_STENCIL_ROUNDED_MASK, "stencil_rounded_mask"},
   });
 
   static_assert(static_cast<size_t>(ShaderMethodGL::SM_MAX) == ShaderMethodGLMap.size(),
@@ -89,6 +91,9 @@ public:
   CRect ClipRectToScissorRect(const CRect &rect) override;
   void SetScissors(const CRect &rect) override;
   void ResetScissors() override;
+
+  bool BeginStencilClip(const CRect& rect, float radius) override;
+  void EndStencilClip() override;
 
   void SetDepthCulling(DEPTH_CULLING culling) override;
 
@@ -143,6 +148,11 @@ protected:
   GLint m_viewPort[4];
 
   std::map<ShaderMethodGL, std::unique_ptr<CGLShader>> m_pShader;
+
+  // Stencil clip nesting state (OpenGL backend).
+  uint8_t m_stencilRef = 0;
+  GLint m_maskRectLoc = -1;
+  GLint m_maskRadiusLoc = -1;
   ShaderMethodGL m_method = ShaderMethodGL::SM_DEFAULT;
   GLuint m_vertexArray = GL_NONE;
 };

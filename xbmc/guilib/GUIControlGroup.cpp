@@ -107,10 +107,13 @@ void CGUIControlGroup::Process(unsigned int currentTime, CDirtyRegionList &dirty
 void CGUIControlGroup::Render()
 {
   CPoint pos(GetPosition());
+  CGraphicContext& gfx = CServiceBroker::GetWinSystem()->GetGfxContext();
+  const float radius = m_cornerRadius;
+  const bool useRoundedStencil = (radius > 0.0f);
   const bool clipped =
-    m_clipping && CServiceBroker::GetWinSystem()->GetGfxContext().SetClipRegionScissor(
-                      pos.x, pos.y, m_width, m_height);
-  CServiceBroker::GetWinSystem()->GetGfxContext().SetOrigin(pos.x, pos.y);
+      useRoundedStencil ? gfx.SetClipRegionStencilRounded(pos.x, pos.y, m_width, m_height, radius)
+                        : (m_clipping && gfx.SetClipRegionScissor(pos.x, pos.y, m_width, m_height));
+  gfx.SetOrigin(pos.x, pos.y);
   CGUIControl *focusedControl = NULL;
   if (CServiceBroker::GetWinSystem()->GetGfxContext().GetRenderOrder() ==
       RENDER_ORDER_FRONT_TO_BACK)
@@ -136,29 +139,40 @@ void CGUIControlGroup::Render()
   if (focusedControl)
     focusedControl->DoRender();
   CGUIControl::Render();
-  CServiceBroker::GetWinSystem()->GetGfxContext().RestoreOrigin();
+  gfx.RestoreOrigin();
   if (clipped)
-    CServiceBroker::GetWinSystem()->GetGfxContext().RestoreClipRegionScissor();
+  {
+    if (useRoundedStencil)
+      gfx.RestoreClipRegionStencil();
+    else
+      gfx.RestoreClipRegionScissor();
+  }
 }
 
 void CGUIControlGroup::RenderEx()
 {
   CPoint pos(GetPosition());
 
+  CGraphicContext& gfx = CServiceBroker::GetWinSystem()->GetGfxContext();
+  const float radius = m_cornerRadius;
+  const bool useRoundedStencil = (radius > 0.0f);
   const bool clipped =
-      m_clipping && CServiceBroker::GetWinSystem()->GetGfxContext().SetClipRegionScissor(
-                        pos.x, pos.y, m_width, m_height);
-
-  CServiceBroker::GetWinSystem()->GetGfxContext().SetOrigin(pos.x, pos.y);
+      useRoundedStencil ? gfx.SetClipRegionStencilRounded(pos.x, pos.y, m_width, m_height, radius)
+                        : (m_clipping && gfx.SetClipRegionScissor(pos.x, pos.y, m_width, m_height));
+  gfx.SetOrigin(pos.x, pos.y);
 
   for (auto *control : m_children)
     control->RenderEx();
   CGUIControl::RenderEx();
 
-  CServiceBroker::GetWinSystem()->GetGfxContext().RestoreOrigin();
-
+  gfx.RestoreOrigin();
   if (clipped)
-    CServiceBroker::GetWinSystem()->GetGfxContext().RestoreClipRegionScissor();
+  {
+    if (useRoundedStencil)
+      gfx.RestoreClipRegionStencil();
+    else
+      gfx.RestoreClipRegionScissor();
+  }
 }
 
 bool CGUIControlGroup::OnAction(const CAction &action)

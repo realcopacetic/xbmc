@@ -207,12 +207,17 @@ public:
   CRect GetClipRegion();
   bool SetClipRegionScissor(float x, float y, float w, float h);
   void RestoreClipRegionScissor();
+  // Stencil-based clipping (intended for rotation-safe and/or rounded clipping).
+  // Coordinates are in FINAL (render) coordinates after transform stack, matching scissor behavior.
+  bool SetClipRegionStencilRect(float x, float y, float w, float h);
+  bool SetClipRegionStencilRounded(float x, float y, float w, float h, float radius);
+  void RestoreClipRegionStencil();
   void AddGUITransform();
   TransformMatrix AddTransform(const TransformMatrix &matrix);
   void SetTransform(const TransformMatrix &matrix);
   void SetTransform(const TransformMatrix &matrix, float scaleX, float scaleY);
   void RemoveTransform();
-
+  
   /* modifies final coordinates according to stereo mode if needed */
   CRect StereoCorrection(const CRect &rect) const;
   CPoint StereoCorrection(const CPoint &point) const;
@@ -247,6 +252,9 @@ protected:
   std::stack<CPoint> m_cameras;
   std::stack<CPoint> m_origins;
   std::stack<CRect> m_clipRegions;
+  std::stack<CRect> m_stencilRegions;
+  std::stack<float> m_stencilRadii;
+  std::stack<bool> m_stencilBackend;
   std::stack<CRect> m_scissorRegions;
   std::stack<float> m_stereoFactors;
   std::stack<CRect> m_viewStack;
