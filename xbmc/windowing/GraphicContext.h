@@ -202,6 +202,9 @@ public:
   CRect GetClipRegion();
   bool SetClipRegionScissor(float x, float y, float w, float h);
   void RestoreClipRegionScissor();
+  bool BeginOffscreenRoundedGroup(float x, float y, float w, float h, float radiusGui);
+  void EndOffscreenRoundedGroup();
+
   void AddGUITransform();
   TransformMatrix AddTransform(const TransformMatrix &matrix);
   void SetTransform(const TransformMatrix &matrix);

@@ -140,6 +140,48 @@ void CGraphicContext::RestoreClipRegionScissor()
   SetScissors(m_scissorRegions.top());
 }
 
+bool CGraphicContext::BeginOffscreenRoundedGroup(float x, float y, float w, float h, float radiusGui)
+{
+  if (w <= 0.0f || h <= 0.0f)
+    return false;
+
+  float x1 = x,     y1 = y;
+  float x2 = x + w, y2 = y + h;
+  float z = 0.0f;
+
+  ScaleFinalCoords(x1, y1, z);
+  ScaleFinalCoords(x2, y2, z);
+
+  if (x2 < x1)
+    std::swap(x1, x2);
+  if (y2 < y1)
+    std::swap(y1, y2);
+
+  const CRect rectScreenTL(x1, y1, x2, y2);
+
+  // Radius must be in the same coord space as rectScreenTL (post ScaleFinalCoords()).
+  float radiusScreen = 0.0f;
+  if (radiusGui > 0.0f)
+  {
+    float ax0 = 0.0f, ay0 = 0.0f;
+    float ax1 = radiusGui, ay1 = radiusGui;
+    float az = 0.0f;
+
+    ScaleFinalCoords(ax0, ay0, az);
+    ScaleFinalCoords(ax1, ay1, az);
+
+    const float scaleX = std::abs(ax1 - ax0) / radiusGui;
+    const float scaleY = std::abs(ay1 - ay0) / radiusGui;
+    radiusScreen = radiusGui * std::min(scaleX, scaleY);
+  }
+
+  return CServiceBroker::GetRenderSystem()->BeginOffscreenRoundedGroup(rectScreenTL, radiusScreen);
+}
+
+void CGraphicContext::EndOffscreenRoundedGroup()
+{
+  CServiceBroker::GetRenderSystem()->EndOffscreenRoundedGroup();
+}
 
 void CGraphicContext::ClipRect(CRect &vertex, CRect &texture, CRect *texture2)
 {

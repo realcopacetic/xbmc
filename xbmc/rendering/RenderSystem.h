@@ -57,6 +57,10 @@ public:
   virtual void SetScissors(const CRect &rect) = 0;
   virtual void ResetScissors() = 0;
 
+  // Render group to an offscreen target and composite it back with a round-rect mask (AA-capable).
+  virtual bool BeginOffscreenRoundedGroup(const CRect& rectScreenTL, float radiusPx) { return false; }
+  virtual void EndOffscreenRoundedGroup() {}
+
   virtual void SetDepthCulling(DEPTH_CULLING culling) {}
 
   virtual void CaptureStateBlock() = 0;
@@ -106,4 +110,3 @@ protected:
   std::unique_ptr<CGUIImage> m_splashImage;
   std::unique_ptr<CGUITextLayout> m_splashMessageLayout;
 };
-

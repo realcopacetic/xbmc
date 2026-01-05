@@ -43,6 +43,8 @@ CGUIControlGroup::CGUIControlGroup(const CGUIControlGroup &from)
   m_defaultControl = from.m_defaultControl;
   m_defaultAlways = from.m_defaultAlways;
   m_renderFocusedLast = from.m_renderFocusedLast;
+  m_clipping = from.m_clipping;
+  m_cornerRadius = from.m_cornerRadius;
   m_transformChildren = from.m_transformChildren;
 
   // run through and add our controls
@@ -106,16 +108,83 @@ void CGUIControlGroup::Process(unsigned int currentTime, CDirtyRegionList &dirty
   m_renderRegion = rect;
 }
 
+namespace
+{
+  enum class ClipMode
+  {
+    None,
+    Offscreen,
+    Scissor
+  };
+
+  ClipMode BeginGroupClip(CGraphicContext& gfx,
+                          const CPoint& pos,
+                          float width,
+                          float height,
+                          bool clipping,
+                          float cornerRadius)
+  {
+    if (!clipping)
+      return ClipMode::None;
+
+    if (cornerRadius > 0.0f)
+    {
+      if (gfx.BeginOffscreenRoundedGroup(pos.x, pos.y, width, height, cornerRadius))
+        return ClipMode::Offscreen;
+    }
+
+    if (gfx.SetClipRegionScissor(pos.x, pos.y, width, height))
+      return ClipMode::Scissor;
+
+    return ClipMode::None;
+  }
+
+  void EndGroupClip(CGraphicContext& gfx, ClipMode mode)
+  {
+    if (mode == ClipMode::Offscreen)
+      gfx.EndOffscreenRoundedGroup();
+    else if (mode == ClipMode::Scissor)
+      gfx.RestoreClipRegionScissor();
+  }
+
+  class GroupClipScope
+  {
+  public:
+    GroupClipScope(CGraphicContext& gfx,
+                   const CPoint& pos,
+                   float width,
+                   float height,
+                   bool clipping,
+                   float cornerRadius)
+      : m_gfx(gfx),
+        m_clipMode(BeginGroupClip(gfx, pos, width, height, clipping, cornerRadius))
+    {
+      m_gfx.SetOrigin(pos.x, pos.y);
+    }
+
+    ~GroupClipScope()
+    {
+      m_gfx.RestoreOrigin();
+      EndGroupClip(m_gfx, m_clipMode);
+    }
+
+    GroupClipScope(const GroupClipScope&) = delete;
+    GroupClipScope& operator=(const GroupClipScope&) = delete;
+
+  private:
+    CGraphicContext& m_gfx;
+    ClipMode m_clipMode{ClipMode::None};
+  };
+} // namespace
+
 void CGUIControlGroup::Render()
 {
-  CPoint pos(GetPosition());
-  const bool clipped =
-    m_clipping && CServiceBroker::GetWinSystem()->GetGfxContext().SetClipRegionScissor(
-                      pos.x, pos.y, m_width, m_height);
-  CServiceBroker::GetWinSystem()->GetGfxContext().SetOrigin(pos.x, pos.y);
-  CGUIControl *focusedControl = NULL;
-  if (CServiceBroker::GetWinSystem()->GetGfxContext().GetRenderOrder() ==
-      RENDER_ORDER_FRONT_TO_BACK)
+  const CPoint pos(GetPosition());
+  CGraphicContext& gfx = CServiceBroker::GetWinSystem()->GetGfxContext();
+
+  GroupClipScope scope(gfx, pos, m_width, m_height, m_clipping, m_cornerRadius);
+  CGUIControl* focusedControl = nullptr;
+  if (gfx.GetRenderOrder() == RENDER_ORDER_FRONT_TO_BACK)
   {
     for (auto it = m_children.rbegin(); it != m_children.rend(); ++it)
     {
@@ -138,29 +207,18 @@ void CGUIControlGroup::Render()
   if (focusedControl)
     focusedControl->DoRender();
   CGUIControl::Render();
-  CServiceBroker::GetWinSystem()->GetGfxContext().RestoreOrigin();
-  if (clipped)
-    CServiceBroker::GetWinSystem()->GetGfxContext().RestoreClipRegionScissor();
 }
 
 void CGUIControlGroup::RenderEx()
 {
-  CPoint pos(GetPosition());
+  const CPoint pos(GetPosition());
+  CGraphicContext& gfx = CServiceBroker::GetWinSystem()->GetGfxContext();
 
-  const bool clipped =
-      m_clipping && CServiceBroker::GetWinSystem()->GetGfxContext().SetClipRegionScissor(
-                        pos.x, pos.y, m_width, m_height);
+  GroupClipScope scope(gfx, pos, m_width, m_height, m_clipping, m_cornerRadius);
 
-  CServiceBroker::GetWinSystem()->GetGfxContext().SetOrigin(pos.x, pos.y);
-
-  for (auto *control : m_children)
+  for (auto* control : m_children)
     control->RenderEx();
   CGUIControl::RenderEx();
-
-  CServiceBroker::GetWinSystem()->GetGfxContext().RestoreOrigin();
-
-  if (clipped)
-    CServiceBroker::GetWinSystem()->GetGfxContext().RestoreClipRegionScissor();
 }
 
 bool CGUIControlGroup::OnAction(const CAction &action)
