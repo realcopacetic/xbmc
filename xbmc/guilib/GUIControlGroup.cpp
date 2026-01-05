@@ -10,6 +10,7 @@
 
 #include "GUIMessage.h"
 #include "input/mouse/MouseEvent.h"
+#include "utils/log.h"
 
 #include <cassert>
 #include <utility>
@@ -107,18 +108,44 @@ void CGUIControlGroup::Process(unsigned int currentTime, CDirtyRegionList &dirty
 void CGUIControlGroup::Render()
 {
   CPoint pos(GetPosition());
-  const bool clipped =
-    m_clipping && CServiceBroker::GetWinSystem()->GetGfxContext().SetClipRegionScissor(
-                      pos.x, pos.y, m_width, m_height);
-  CServiceBroker::GetWinSystem()->GetGfxContext().SetOrigin(pos.x, pos.y);
-  CGUIControl *focusedControl = NULL;
-  if (CServiceBroker::GetWinSystem()->GetGfxContext().GetRenderOrder() ==
-      RENDER_ORDER_FRONT_TO_BACK)
+  CGraphicContext& gfx = CServiceBroker::GetWinSystem()->GetGfxContext();
+
+  enum class ClipMode
+  {
+    None,
+    Scissor,
+    Stencil
+  };
+
+  ClipMode clipMode = ClipMode::None;
+  bool clipped = false;
+
+  if (m_clipping)
+  {
+    if (m_cornerRadius > 0.0f)
+    {
+      clipped = gfx.SetClipRegionStencilRounded(pos.x, pos.y, m_width, m_height, m_cornerRadius);
+      if (clipped)
+        clipMode = ClipMode::Stencil;
+    }
+
+    if (!clipped)
+    {
+      clipped = gfx.SetClipRegionScissor(pos.x, pos.y, m_width, m_height);
+      if (clipped)
+        clipMode = ClipMode::Scissor;
+    }
+  }
+
+  gfx.SetOrigin(pos.x, pos.y);
+
+  CGUIControl* focusedControl = nullptr;
+  if (gfx.GetRenderOrder() == RENDER_ORDER_FRONT_TO_BACK)
   {
     for (auto it = m_children.rbegin(); it != m_children.rend(); ++it)
     {
       if (m_renderFocusedLast && (*it)->HasFocus())
-        focusedControl = (*it);
+        focusedControl = *it;
       else
         (*it)->DoRender();
     }
@@ -133,32 +160,73 @@ void CGUIControlGroup::Render()
         control->DoRender();
     }
   }
+
   if (focusedControl)
     focusedControl->DoRender();
+
   CGUIControl::Render();
-  CServiceBroker::GetWinSystem()->GetGfxContext().RestoreOrigin();
+
+  gfx.RestoreOrigin();
+
   if (clipped)
-    CServiceBroker::GetWinSystem()->GetGfxContext().RestoreClipRegionScissor();
+  {
+    if (clipMode == ClipMode::Stencil)
+      gfx.RestoreClipRegionStencil();
+    else if (clipMode == ClipMode::Scissor)
+      gfx.RestoreClipRegionScissor();
+  }
+  if (GetID() == 3333)
+    CLog::Log(LOGINFO, "Group 3333 clipMode={} clipped={}", (int)clipMode, clipped);
 }
 
 void CGUIControlGroup::RenderEx()
 {
   CPoint pos(GetPosition());
 
-  const bool clipped =
-      m_clipping && CServiceBroker::GetWinSystem()->GetGfxContext().SetClipRegionScissor(
-                        pos.x, pos.y, m_width, m_height);
+  CGraphicContext& gfx = CServiceBroker::GetWinSystem()->GetGfxContext();
 
-  CServiceBroker::GetWinSystem()->GetGfxContext().SetOrigin(pos.x, pos.y);
+  enum class ClipMode
+  {
+    None,
+    Scissor,
+    Stencil
+  };
+
+  ClipMode clipMode = ClipMode::None;
+  bool clipped = false;
+
+  if (m_clipping)
+  {
+    if (m_cornerRadius > 0.0f)
+    {
+      clipped = gfx.SetClipRegionStencilRounded(pos.x, pos.y, m_width, m_height, m_cornerRadius);
+      if (clipped)
+        clipMode = ClipMode::Stencil;
+    }
+
+    if (!clipped)
+    {
+      clipped = gfx.SetClipRegionScissor(pos.x, pos.y, m_width, m_height);
+      if (clipped)
+        clipMode = ClipMode::Scissor;
+    }
+  }
+
+  gfx.SetOrigin(pos.x, pos.y);
 
   for (auto *control : m_children)
     control->RenderEx();
   CGUIControl::RenderEx();
 
-  CServiceBroker::GetWinSystem()->GetGfxContext().RestoreOrigin();
+  gfx.RestoreOrigin();
 
   if (clipped)
-    CServiceBroker::GetWinSystem()->GetGfxContext().RestoreClipRegionScissor();
+  {
+    if (clipMode == ClipMode::Stencil)
+      gfx.RestoreClipRegionStencil();
+    else if (clipMode == ClipMode::Scissor)
+      gfx.RestoreClipRegionScissor();
+  }
 }
 
 bool CGUIControlGroup::OnAction(const CAction &action)

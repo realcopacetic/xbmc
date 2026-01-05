@@ -25,6 +25,10 @@
 #include "utils/log.h"
 #include "windowing/GraphicContext.h"
 
+#include <algorithm>
+#include <cmath>
+#include <array>
+
 #if defined(TARGET_LINUX)
 #include "utils/EGLUtils.h"
 #endif
@@ -440,6 +444,34 @@ void CRenderSystemGLES::SetDepthCulling(DEPTH_CULLING culling)
   }
 }
 
+static bool HasStencilBufferForCurrentDrawTarget()
+{
+  GLint fbo = 0;
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
+
+  if (fbo == 0)
+  {
+    GLint stencilBits = 0;
+    glGetIntegerv(GL_STENCIL_BITS, &stencilBits);
+    return stencilBits > 0;
+  }
+
+  GLint objType = GL_NONE;
+
+  glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER,
+                                        GL_DEPTH_STENCIL_ATTACHMENT,
+                                        GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE,
+                                        &objType);
+  if (objType != GL_NONE)
+    return true;
+
+  glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER,
+                                        GL_STENCIL_ATTACHMENT,
+                                        GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE,
+                                        &objType);
+  return objType != GL_NONE;
+}
+
 void CRenderSystemGLES::InitialiseShaders()
 {
   std::string defines;
@@ -613,6 +645,24 @@ void CRenderSystemGLES::InitialiseShaders()
     m_pShader[ShaderMethodGLES::SM_TEXTURE_NOALPHA].reset();
     CLog::Log(LOGERROR, "GUI Shader gles_shader_texture_noalpha.frag - compile and link failed");
   }
+
+  m_pShader[ShaderMethodGLES::SM_STENCIL_ROUNDED_MASK] = std::make_unique<CGLESShader>(
+      "gles_shader_roundrect_mask.vert", "gles_shader_roundrect_mask.frag", defines);
+  if (!m_pShader[ShaderMethodGLES::SM_STENCIL_ROUNDED_MASK]->CompileAndLink())
+  {
+    m_pShader[ShaderMethodGLES::SM_STENCIL_ROUNDED_MASK]->Free();
+    m_pShader[ShaderMethodGLES::SM_STENCIL_ROUNDED_MASK].reset();
+    CLog::Log(LOGERROR, "GUI Shader gles_shader_roundrect_mask.vert "
+                        "gles_shader_roundrect_mask.frag - compile and link failed");
+  }
+  else
+  {
+    CLog::Log(LOGINFO, "GLES GUI Shader roundrect mask compiled OK");
+    const GLuint prog = m_pShader[ShaderMethodGLES::SM_STENCIL_ROUNDED_MASK]->ProgramHandle();
+    m_maskRectLoc = glGetUniformLocation(prog, "m_maskRect");
+    m_maskRadiusLoc = glGetUniformLocation(prog, "m_radius");
+    m_roundMaskPosLoc = glGetAttribLocation(prog, "m_attrpos");
+  }
 }
 
 void CRenderSystemGLES::ReleaseShaders()
@@ -684,6 +734,255 @@ void CRenderSystemGLES::ReleaseShaders()
   if (m_pShader[ShaderMethodGLES::SM_TEXTURE_NOALPHA])
     m_pShader[ShaderMethodGLES::SM_TEXTURE_NOALPHA]->Free();
   m_pShader[ShaderMethodGLES::SM_TEXTURE_NOALPHA].reset();
+
+  if (m_pShader[ShaderMethodGLES::SM_STENCIL_ROUNDED_MASK])
+    m_pShader[ShaderMethodGLES::SM_STENCIL_ROUNDED_MASK]->Free();
+  m_pShader[ShaderMethodGLES::SM_STENCIL_ROUNDED_MASK].reset();
+
+  if (m_roundMaskVbo != 0)
+  {
+    glDeleteBuffers(1, &m_roundMaskVbo);
+    m_roundMaskVbo = 0;
+  }
+}
+
+bool CRenderSystemGLES::BeginStencilClip(const CRect& rectScreenTL, float radiusGui)
+{
+  // Single-level only for now.
+  if (m_stencilRef != 0)
+    return false;
+
+  if (!HasStencilBufferForCurrentDrawTarget())
+    return false;
+
+  // Viewport in framebuffer pixels (x,y,w,h)
+  GLint vp[4] = {0, 0, 0, 0};
+  glGetIntegerv(GL_VIEWPORT, vp);
+  const float vpW = static_cast<float>(vp[2]);
+  const float vpH = static_cast<float>(vp[3]);
+  if (vpW <= 0.0f || vpH <= 0.0f)
+    return false;
+
+  // Base GUI size in logical coords (no transforms). This is the key: radius should not scale with
+  // the current transform matrix, only with GUI->framebuffer scaling.
+  CGraphicContext& gfx = CServiceBroker::GetWinSystem()->GetGfxContext();
+  const float guiW = static_cast<float>(gfx.GetWidth());
+  const float guiH = static_cast<float>(gfx.GetHeight());
+  if (guiW <= 0.0f || guiH <= 0.0f)
+    return false;
+
+  // Convert final screen coords (top-left) -> framebuffer pixels (bottom-left).
+  // At this point, rectScreenTL is already scaled by GraphicContext::ScaleFinalCoords().
+  CRect rectFbBL(rectScreenTL.x1,
+                 vpH - rectScreenTL.y2,
+                 rectScreenTL.x2,
+                 vpH - rectScreenTL.y1);
+
+  if (rectFbBL.x2 < rectFbBL.x1)
+    std::swap(rectFbBL.x1, rectFbBL.x2);
+  if (rectFbBL.y2 < rectFbBL.y1)
+    std::swap(rectFbBL.y1, rectFbBL.y2);
+
+  if (rectFbBL.IsEmpty())
+    return false;
+
+  // Radius: GUI logical -> framebuffer pixels (ignore current transforms).
+  const float sx = vpW / guiW;
+  const float sy = vpH / guiH;
+  const float s  = std::max(sx, sy);
+
+  const float maxR = std::min(rectFbBL.Width(), rectFbBL.Height()) * 0.5f;
+  const float rFb  = std::max(0.0f, std::min(radiusGui * s, maxR));
+
+  // Grab the rounded-mask shader (already compiled in InitialiseShaders)
+  auto* shader = m_pShader[ShaderMethodGLES::SM_STENCIL_ROUNDED_MASK].get();
+  if (!shader)
+    return false;
+
+  const GLuint prog = shader->ProgramHandle();
+  if (prog == 0)
+    return false;
+
+  // ---- Save minimal GL state we touch ----
+  GLboolean prevColorMask[4] = {GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
+  glGetBooleanv(GL_COLOR_WRITEMASK, prevColorMask);
+
+  GLboolean prevDepthMask = GL_TRUE;
+  glGetBooleanv(GL_DEPTH_WRITEMASK, &prevDepthMask);
+
+  const GLboolean depthTestWasEnabled = glIsEnabled(GL_DEPTH_TEST);
+  const GLboolean blendWasEnabled     = glIsEnabled(GL_BLEND);
+
+  GLint prevArrayBuf = 0;
+  glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArrayBuf);
+
+  GLint prevProgram = 0;
+  glGetIntegerv(GL_CURRENT_PROGRAM, &prevProgram);
+
+  // ---- Prepare stencil ----
+  glEnable(GL_STENCIL_TEST);
+
+  // Clear stencil fully to avoid stale ref values outside the clip rect.
+  glStencilMask(0xFF);
+  glClearStencil(0);
+  glClear(GL_STENCIL_BUFFER_BIT);
+
+  constexpr GLint kRef = 1;
+  glStencilFunc(GL_ALWAYS, kRef, 0xFF);
+  glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+
+  // Mask draw should not affect color/depth; avoid depth/blend interference.
+  glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+  glDepthMask(GL_FALSE);
+  if (depthTestWasEnabled)
+    glDisable(GL_DEPTH_TEST);
+  if (blendWasEnabled)
+    glDisable(GL_BLEND);
+
+  // ---- Bind program directly (do NOT call EnableGUIShader) ----
+  glUseProgram(prog);
+
+  // Provide uniforms in framebuffer pixel space (bottom-left origin).
+  if (m_maskRectLoc >= 0)
+    glUniform4f(m_maskRectLoc, rectFbBL.x1, rectFbBL.y1, rectFbBL.x2, rectFbBL.y2);
+  if (m_maskRadiusLoc >= 0)
+    glUniform1f(m_maskRadiusLoc, rFb);
+
+  // Force identity matrix so we can supply vertices in NDC (-1..1).
+  const GLint matrixLoc = glGetUniformLocation(prog, "m_matrix");
+  if (matrixLoc >= 0)
+  {
+    const GLfloat I[16] = {
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1
+    };
+    glUniformMatrix4fv(matrixLoc, 1, GL_FALSE, I);
+  }
+
+  // ---- Build rounded-rect geometry in framebuffer pixels, convert to NDC ----
+  auto toNdcX = [&](float xPx) -> float { return (xPx / vpW) * 2.0f - 1.0f; };
+  auto toNdcY = [&](float yPx) -> float { return (yPx / vpH) * 2.0f - 1.0f; };
+
+  const float rx = rFb;
+  const float ry = rFb;
+
+  const float px1 = rectFbBL.x1;
+  const float py1 = rectFbBL.y1;
+  const float px2 = rectFbBL.x2;
+  const float py2 = rectFbBL.y2;
+
+  // Corner centers (in framebuffer pixels)
+  const float cblx = px1 + rx, cbly = py1 + ry;
+  const float cbrx = px2 - rx, cbry = py1 + ry;
+  const float ctrx = px2 - rx, ctry = py2 - ry;
+  const float ctlx = px1 + rx, ctly = py2 - ry;
+
+  // If radius is 0, it's just a rectangle fan.
+  const int kSeg = 10; // segments per corner (tweak if you want smoother)
+  std::vector<GLfloat> verts;
+  verts.reserve(2 * (1 + 4 * (kSeg + 1) + 1));
+
+  // Fan center (NDC)
+  const float cx = 0.5f * (px1 + px2);
+  const float cy = 0.5f * (py1 + py2);
+  verts.push_back(toNdcX(cx));
+  verts.push_back(toNdcY(cy));
+
+  auto pushArc = [&](float ccx, float ccy, float a0, float a1)
+  {
+    // angles in radians
+    for (int i = 0; i <= kSeg; ++i)
+    {
+      const float t = static_cast<float>(i) / static_cast<float>(kSeg);
+      const float a = a0 + (a1 - a0) * t;
+      const float x = ccx + std::cos(a) * rx;
+      const float y = ccy + std::sin(a) * ry;
+      verts.push_back(toNdcX(x));
+      verts.push_back(toNdcY(y));
+    }
+  };
+
+  if (rFb > 0.0f)
+  {
+    // Perimeter clockwise starting at bottom-left corner going to bottom-right etc.
+    // Bottom-left arc: 180° -> 270°
+    pushArc(cblx, cbly, static_cast<float>(M_PI), static_cast<float>(1.5 * M_PI));
+    // Bottom-right arc: 270° -> 360°
+    pushArc(cbrx, cbry, static_cast<float>(1.5 * M_PI), static_cast<float>(2.0 * M_PI));
+    // Top-right arc: 0° -> 90°
+    pushArc(ctrx, ctry, 0.0f, static_cast<float>(0.5 * M_PI));
+    // Top-left arc: 90° -> 180°
+    pushArc(ctlx, ctly, static_cast<float>(0.5 * M_PI), static_cast<float>(M_PI));
+  }
+  else
+  {
+    // Rectangle perimeter (clockwise)
+    verts.push_back(toNdcX(px1)); verts.push_back(toNdcY(py1));
+    verts.push_back(toNdcX(px2)); verts.push_back(toNdcY(py1));
+    verts.push_back(toNdcX(px2)); verts.push_back(toNdcY(py2));
+    verts.push_back(toNdcX(px1)); verts.push_back(toNdcY(py2));
+  }
+
+  // Close the loop by repeating the first perimeter point (after center)
+  if (verts.size() >= 4)
+  {
+    verts.push_back(verts[2]);
+    verts.push_back(verts[3]);
+  }
+
+  // Upload + draw
+  if (m_roundMaskVbo == 0)
+    glGenBuffers(1, &m_roundMaskVbo);
+
+  glBindBuffer(GL_ARRAY_BUFFER, m_roundMaskVbo);
+  glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(GLfloat), verts.data(), GL_STREAM_DRAW);
+
+  bool drew = false;
+  if (m_roundMaskPosLoc >= 0)
+  {
+    glEnableVertexAttribArray(m_roundMaskPosLoc);
+    glVertexAttribPointer(m_roundMaskPosLoc, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+    glDrawArrays(GL_TRIANGLE_FAN, 0, static_cast<GLsizei>(verts.size() / 2));
+    glDisableVertexAttribArray(m_roundMaskPosLoc);
+    drew = true;
+  }
+
+  // ---- Restore state ----
+  glBindBuffer(GL_ARRAY_BUFFER, prevArrayBuf);
+  glUseProgram(prevProgram);
+
+  glColorMask(prevColorMask[0], prevColorMask[1], prevColorMask[2], prevColorMask[3]);
+  glDepthMask(prevDepthMask);
+
+  if (depthTestWasEnabled)
+    glEnable(GL_DEPTH_TEST);
+  if (blendWasEnabled)
+    glEnable(GL_BLEND);
+
+  if (!drew)
+  {
+    glDisable(GL_STENCIL_TEST);
+    return false;
+  }
+
+  // Switch to clip mode: only draw where stencil == ref
+  glStencilMask(0x00);
+  glStencilFunc(GL_EQUAL, kRef, 0xFF);
+  glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+
+  m_stencilRef = static_cast<uint8_t>(kRef);
+  return true;
+}
+
+void CRenderSystemGLES::EndStencilClip()
+{
+  if (m_stencilRef == 0)
+    return;
+
+  m_stencilRef = 0;
+  glDisable(GL_STENCIL_TEST);
 }
 
 void CRenderSystemGLES::EnableGUIShader(ShaderMethodGLES method)

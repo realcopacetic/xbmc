@@ -72,12 +72,16 @@ public:
   // Clip children to this group's bounds using render-space scissor rectangles.
   // This constrains both static rendering and animated transforms.
   void SetClipping(bool clip) { m_clipping = clip; }
+  // Optional rounded clipping radius (in screen pixels).
+  // A value <= 0 disables rounded clipping.
+  void SetCornerRadius(float radius) { m_cornerRadius = radius; }
   void SetTransformChildren(bool transform) { m_transformChildren = transform; }
   void SaveStates(std::vector<CControlState> &states) override;
 
   bool IsGroup() const override { return true; }
   bool TransformChildren() const override { return m_transformChildren; }
   bool m_clipping{false};
+  float m_cornerRadius{0.0f};
   bool m_transformChildren{true};
 
 #ifdef _DEBUG

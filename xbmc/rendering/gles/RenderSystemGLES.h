@@ -38,6 +38,7 @@ enum class ShaderMethodGLES
   SM_TEXTURE_RGBA_BOB,
   SM_TEXTURE_RGBA_BOB_OES,
   SM_TEXTURE_NOALPHA,
+  SM_STENCIL_ROUNDED_MASK,
   SM_MAX
 };
 
@@ -75,6 +76,7 @@ private:
       {ShaderMethodGLES::SM_TEXTURE_RGBA_BOB, "texture rgba bob"},
       {ShaderMethodGLES::SM_TEXTURE_RGBA_BOB_OES, "texture rgba bob OES"},
       {ShaderMethodGLES::SM_TEXTURE_NOALPHA, "texture no alpha"},
+      {ShaderMethodGLES::SM_STENCIL_ROUNDED_MASK, "stencil_rounded_mask"},
   });
 
   static_assert(static_cast<size_t>(ShaderMethodGLES::SM_MAX) == ShaderMethodGLESMap.size(),
@@ -109,6 +111,9 @@ public:
   CRect ClipRectToScissorRect(const CRect &rect) override;
   void SetScissors(const CRect& rect) override;
   void ResetScissors() override;
+
+  bool BeginStencilClip(const CRect& rectFbBL, float radiusFbPx) override;
+  void EndStencilClip() override;
 
   void SetDepthCulling(DEPTH_CULLING culling) override;
 
@@ -156,6 +161,38 @@ protected:
   std::string m_RenderExtensions;
 
   std::map<ShaderMethodGLES, std::unique_ptr<CGLESShader>> m_pShader;
+
+  // Stencil clip state (single-level by design for now)
+  uint8_t m_stencilRef{0};
+  GLint m_maskRectLoc{-1};
+  GLint m_maskRadiusLoc{-1};
+
+  // Fullscreen quad resources for stencil mask draw
+  GLuint m_roundMaskVbo{0};
+  GLint m_roundMaskPosLoc{-1};
+
+  struct StencilSavedState
+  {
+    GLboolean stencilEnabled{GL_FALSE};
+    GLint stencilFunc{GL_ALWAYS};
+    GLint stencilRef{0};
+    GLint stencilValueMask{0xFF};
+    GLint stencilWriteMask{0xFF};
+    GLint stencilFail{GL_KEEP};
+    GLint stencilZFail{GL_KEEP};
+    GLint stencilZPass{GL_KEEP};
+
+    GLboolean scissorEnabled{GL_FALSE};
+    GLint scissorBox[4]{0, 0, 0, 0};
+
+    GLboolean colorMask[4]{GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
+    GLboolean depthMask{GL_TRUE};
+    GLboolean depthTestEnabled{GL_FALSE};
+  };
+
+  StencilSavedState m_stencilSaved{};
+  bool m_stencilSavedValid{false};
+
   ShaderMethodGLES m_method = ShaderMethodGLES::SM_DEFAULT;
 
   GLint      m_viewPort[4];

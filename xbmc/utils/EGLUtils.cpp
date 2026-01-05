@@ -276,41 +276,55 @@ bool CEGLContextUtils::ChooseConfig(EGLint renderableType, EGLint visualId, bool
   EGLint numMatched{0};
 
   if (m_eglDisplay == EGL_NO_DISPLAY)
-  {
     throw std::logic_error("Choosing an EGLConfig requires an EGL display");
-  }
 
   EGLint surfaceType = EGL_WINDOW_BIT;
 
-  CEGLAttributesVec attribs;
-  attribs.Add({{EGL_RED_SIZE, 8},
-               {EGL_GREEN_SIZE, 8},
-               {EGL_BLUE_SIZE, 8},
-               {EGL_ALPHA_SIZE, 8},
-               {EGL_DEPTH_SIZE, 16},
-               {EGL_STENCIL_SIZE, 0},
-               {EGL_SAMPLE_BUFFERS, 0},
-               {EGL_SAMPLES, 0},
-               {EGL_SURFACE_TYPE, surfaceType},
-               {EGL_RENDERABLE_TYPE, renderableType}});
+  auto buildAttribs = [&](EGLint stencilSize) -> CEGLAttributesVec
+  {
+    CEGLAttributesVec a;
+    a.Add({{EGL_RED_SIZE, 8},
+           {EGL_GREEN_SIZE, 8},
+           {EGL_BLUE_SIZE, 8},
+           {EGL_ALPHA_SIZE, 8},
+           {EGL_DEPTH_SIZE, 16},
+           {EGL_STENCIL_SIZE, stencilSize},
+           {EGL_SAMPLE_BUFFERS, 0},
+           {EGL_SAMPLES, 0},
+           {EGL_SURFACE_TYPE, surfaceType},
+           {EGL_RENDERABLE_TYPE, renderableType}});
+
+    if (hdr)
+#if EGL_EXT_pixel_format_float
+      a.Add({{EGL_COLOR_COMPONENT_TYPE_EXT, EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT}});
+#else
+      throw std::logic_error("HDR requested but EGL_EXT_pixel_format_float is not available");
+#endif
+
+    return a;
+  };
+
+  bool retryWithoutStencil = false;
+  CEGLAttributesVec attribs = buildAttribs(8);
 
   EGLConfig* currentConfig(hdr ? &m_eglHDRConfig : &m_eglConfig);
 
-  if (hdr)
-#if EGL_EXT_pixel_format_float
-    attribs.Add({{EGL_COLOR_COMPONENT_TYPE_EXT, EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT}});
-#else
-    return false;
-#endif
-
   const char* errorMsg = nullptr;
 
+  // First pass: query number of matching configs (prefer stencil)
   if (eglChooseConfig(m_eglDisplay, attribs.Get(), nullptr, 0, &numMatched) != EGL_TRUE)
+  {
     errorMsg = "failed to query number of EGL configs";
+  }
+  else if (numMatched == 0)
+  {
+    // Retry without stencil for compatibility.
+    retryWithoutStencil = true;
+    attribs = buildAttribs(0);
 
-  std::vector<EGLConfig> eglConfigs(numMatched);
-  if (eglChooseConfig(m_eglDisplay, attribs.Get(), eglConfigs.data(), numMatched, &numMatched) != EGL_TRUE)
-    errorMsg = "failed to find EGL configs with appropriate attributes";
+    if (eglChooseConfig(m_eglDisplay, attribs.Get(), nullptr, 0, &numMatched) != EGL_TRUE)
+      errorMsg = "failed to query number of EGL configs";
+  }
 
   if (errorMsg)
   {
@@ -324,8 +338,27 @@ bool CEGLContextUtils::ChooseConfig(EGLint renderableType, EGLint visualId, bool
     return false;
   }
 
+  // Second pass: actually fetch the configs
+  std::vector<EGLConfig> eglConfigs(numMatched);
+  if (eglChooseConfig(m_eglDisplay, attribs.Get(), eglConfigs.data(), numMatched, &numMatched) !=
+      EGL_TRUE)
+  {
+    if (!hdr)
+    {
+      CEGLUtils::Log(LOGERROR, "failed to find EGL configs with appropriate attributes");
+      Destroy();
+    }
+    else
+      CEGLUtils::Log(LOGINFO, "failed to find EGL configs with appropriate attributes");
+    return false;
+  }
+
+  // Optional: log when we had to fall back from stencil request
+  if (retryWithoutStencil)
+    CLog::Log(LOGDEBUG, "EGL: No stencil configs matched; falling back to EGL_STENCIL_SIZE=0");
+
   EGLint id{0};
-  for (const auto &eglConfig: eglConfigs)
+  for (const auto& eglConfig : eglConfigs)
   {
     *currentConfig = eglConfig;
 
@@ -347,14 +380,13 @@ bool CEGLContextUtils::ChooseConfig(EGLint renderableType, EGLint visualId, bool
 
   CLog::Log(LOGDEBUG, "EGL {}Config Attributes:", hdr ? "HDR " : "");
 
-  for (const auto &eglAttribute : eglAttributes)
+  for (const auto& eglAttribute : eglAttributes)
   {
     EGLint value{0};
     if (eglGetConfigAttrib(m_eglDisplay, *currentConfig, eglAttribute.first, &value) != EGL_TRUE)
       CEGLUtils::Log(LOGERROR,
                      StringUtils::Format("failed to query EGL attribute {}", eglAttribute.second));
 
-    // we only need to print the hex value if it's an actual EGL define
     CLog::Log(LOGDEBUG, "  {}: {}", eglAttribute.second,
               (value >= 0x3000 && value <= 0x3200) ? StringUtils::Format("{:#04x}", value)
                                                    : std::to_string(value));

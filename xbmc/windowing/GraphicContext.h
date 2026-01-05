@@ -207,6 +207,10 @@ public:
   CRect GetClipRegion();
   bool SetClipRegionScissor(float x, float y, float w, float h);
   void RestoreClipRegionScissor();
+  // Stencil-based clipping (intended for rotation-safe and/or rounded clipping).
+  // Coordinates are in GUI logical coordinates (top-left origin), consistent with SetClipRegionScissor().
+  bool SetClipRegionStencilRounded(float x, float y, float w, float h, float radiusGui);
+  void RestoreClipRegionStencil();
   void AddGUITransform();
   TransformMatrix AddTransform(const TransformMatrix &matrix);
   void SetTransform(const TransformMatrix &matrix);

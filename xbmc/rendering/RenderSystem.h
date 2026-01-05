@@ -57,6 +57,13 @@ public:
   virtual void SetScissors(const CRect &rect) = 0;
   virtual void ResetScissors() = 0;
 
+  // Stencil-based clipping (rotation-safe / rounded clipping).
+  // rect is in final GUI screen coords (top-left origin), post ScaleFinalCoords().
+  // radius is in the same coord space as rect.
+  // Default implementation is a no-op so render backends can opt in.
+  virtual bool BeginStencilClip(const CRect& rectFbBL, float radiusFbPx) { return false; }
+  virtual void EndStencilClip() {}
+
   virtual void SetDepthCulling(DEPTH_CULLING culling) {}
 
   virtual void CaptureStateBlock() = 0;
@@ -106,4 +113,3 @@ protected:
   std::unique_ptr<CGUIImage> m_splashImage;
   std::unique_ptr<CGUITextLayout> m_splashMessageLayout;
 };
-
