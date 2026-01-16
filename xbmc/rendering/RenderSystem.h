@@ -63,6 +63,12 @@ public:
   // Default implementation is a no-op so render backends can opt in.
   virtual bool BeginStencilClip(const CRect& rectFbBL, float radiusFbPx) { return false; }
   virtual void EndStencilClip() {}
+  // Offscreen + composite rounded group (AA-capable).
+  // rect is in final GUI screen coords (top-left origin), post ScaleFinalCoords().
+  // radius is in the same coord space as rect.
+  // Default implementation is a no-op so render backends can opt in.
+  virtual bool BeginOffscreenRoundedGroup(const CRect& rectScreenTL, float radiusPx) { return false; }
+  virtual void EndOffscreenRoundedGroup() {}
 
   virtual void SetDepthCulling(DEPTH_CULLING culling) {}
 

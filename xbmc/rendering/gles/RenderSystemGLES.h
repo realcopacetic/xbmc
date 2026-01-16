@@ -39,6 +39,7 @@ enum class ShaderMethodGLES
   SM_TEXTURE_RGBA_BOB_OES,
   SM_TEXTURE_NOALPHA,
   SM_STENCIL_ROUNDED_MASK,
+  SM_ROUNDRECT_COMPOSITE,
   SM_MAX
 };
 
@@ -77,6 +78,7 @@ private:
       {ShaderMethodGLES::SM_TEXTURE_RGBA_BOB_OES, "texture rgba bob OES"},
       {ShaderMethodGLES::SM_TEXTURE_NOALPHA, "texture no alpha"},
       {ShaderMethodGLES::SM_STENCIL_ROUNDED_MASK, "stencil_rounded_mask"},
+      {ShaderMethodGLES::SM_ROUNDRECT_COMPOSITE, "roundrect_composite"},
   });
 
   static_assert(static_cast<size_t>(ShaderMethodGLES::SM_MAX) == ShaderMethodGLESMap.size(),
@@ -115,6 +117,8 @@ public:
   bool BeginStencilClip(const CRect& rectFbBL, float radiusFbPx) override;
   void EndStencilClip() override;
 
+  bool BeginOffscreenRoundedGroup(const CRect& rectScreenTL, float radiusPx) override;
+  void EndOffscreenRoundedGroup() override;
   void SetDepthCulling(DEPTH_CULLING culling) override;
 
   void CaptureStateBlock() override;
@@ -166,6 +170,37 @@ protected:
   uint8_t m_stencilRef{0};
   GLint m_maskRectLoc{-1};
   GLint m_maskRadiusLoc{-1};
+  
+  // Reusing SM_STENCIL_ROUNDED_MASK program for offscreen composite as well
+  GLint m_maskSamplerLoc{-1};   // m_samp0
+  GLint m_maskViewportLoc{-1};  // m_viewport
+  GLint m_maskAAWidthLoc{-1};   // m_aaWidth
+  GLint m_maskPosLoc{-1};       // m_attrpos (already have m_roundMaskPosLoc but keep consistent)
+
+  // Composite shader locations
+  GLint m_compMaskRectLoc{-1};
+  GLint m_compRadiusLoc{-1};
+  GLint m_compAAWidthLoc{-1};
+  GLint m_compViewportLoc{-1};
+  GLint m_compSamplerLoc{-1};
+  GLint m_compPosLoc{-1};
+
+  // Offscreen rounded group helpers (GLES only)
+  bool EnsureGroupFbo(int w, int h);
+
+  // Active offscreen rounded group parameters (single-level for now)
+  CRect m_offscreenRect;
+  float m_offscreenRadius{0.0f};
+
+  // Fullscreen offscreen buffer (RGBA) for rounded group rendering
+  GLuint m_groupFbo{0};
+  GLuint m_groupTex{0};
+  int m_groupW{0};
+  int m_groupH{0};
+  bool m_groupActive{false}; // single-level guard
+  GLint m_prevFbo{0};
+  GLint m_prevViewport[4]{0, 0, 0, 0};
+
 
   // Fullscreen quad resources for stencil mask draw
   GLuint m_roundMaskVbo{0};

@@ -211,6 +211,10 @@ public:
   // Coordinates are in GUI logical coordinates (top-left origin), consistent with SetClipRegionScissor().
   bool SetClipRegionStencilRounded(float x, float y, float w, float h, float radiusGui);
   void RestoreClipRegionStencil();
+
+  bool BeginOffscreenRoundedGroup(float x, float y, float w, float h, float radiusGui);
+  void EndOffscreenRoundedGroup();
+
   void AddGUITransform();
   TransformMatrix AddTransform(const TransformMatrix &matrix);
   void SetTransform(const TransformMatrix &matrix);

@@ -40,6 +40,13 @@ CRenderSystemGLES::CRenderSystemGLES()
 {
 }
 
+static void LogGlError(const char* tag)
+{
+  const GLenum err = glGetError();
+  if (err != GL_NO_ERROR)
+    CLog::Log(LOGERROR, "GLES: GL error after {}: 0x{:04x}", tag, static_cast<unsigned int>(err));
+}
+
 bool CRenderSystemGLES::InitRenderSystem()
 {
   GLint maxTextureSize;
@@ -661,7 +668,47 @@ void CRenderSystemGLES::InitialiseShaders()
     const GLuint prog = m_pShader[ShaderMethodGLES::SM_STENCIL_ROUNDED_MASK]->ProgramHandle();
     m_maskRectLoc = glGetUniformLocation(prog, "m_maskRect");
     m_maskRadiusLoc = glGetUniformLocation(prog, "m_radius");
+    // Extra uniforms used by offscreen composite (shader reuse)
+    m_maskSamplerLoc = glGetUniformLocation(prog, "m_samp0");
+    m_maskViewportLoc = glGetUniformLocation(prog, "m_viewport");
+    m_maskAAWidthLoc = glGetUniformLocation(prog, "m_aaWidth");
+    m_maskPosLoc = glGetAttribLocation(prog, "m_attrpos");
     m_roundMaskPosLoc = glGetAttribLocation(prog, "m_attrpos");
+
+    CLog::Log(LOGINFO,
+              "GLES: roundrect(maskcomposite) prog={} pos={} samp={} vp={} rect={} rad={} aa={}",
+              prog, m_maskPosLoc, m_maskSamplerLoc, m_maskViewportLoc,
+              m_maskRectLoc, m_maskRadiusLoc, m_maskAAWidthLoc);
+
+    m_pShader[ShaderMethodGLES::SM_ROUNDRECT_COMPOSITE] = std::make_unique<CGLESShader>(
+        "gles_shader_roundrect_composite.vert", "gles_shader_roundrect_composite.frag", defines);
+    if (!m_pShader[ShaderMethodGLES::SM_ROUNDRECT_COMPOSITE]->CompileAndLink())
+    {
+      m_pShader[ShaderMethodGLES::SM_ROUNDRECT_COMPOSITE]->Free();
+      m_pShader[ShaderMethodGLES::SM_ROUNDRECT_COMPOSITE].reset();
+      CLog::Log(LOGERROR, "GLES GUI Shader gles_shader_roundrect_composite.vert "
+                          "gles_shader_roundrect_composite.frag - compile and link failed");
+    }
+    else
+    {
+      const GLuint p = m_pShader[ShaderMethodGLES::SM_ROUNDRECT_COMPOSITE]->ProgramHandle();
+      m_compMaskRectLoc = glGetUniformLocation(p, "m_maskRect");
+      m_compRadiusLoc = glGetUniformLocation(p, "m_radius");
+      m_compAAWidthLoc = glGetUniformLocation(p, "m_aaWidth");
+      m_compViewportLoc = glGetUniformLocation(p, "m_viewport");
+      m_compSamplerLoc = glGetUniformLocation(p, "m_samp0");
+      m_compPosLoc = glGetAttribLocation(p, "m_attrpos");
+ 
+      CLog::Log(LOGINFO,
+               "GLES: roundrect composite shader OK prog={} posLoc={} sampLoc={} vpLoc={} rectLoc={} radLoc={} aaLoc={}",
+               p,
+               m_compPosLoc,
+               m_compSamplerLoc,
+               m_compViewportLoc,
+               m_compMaskRectLoc,
+               m_compRadiusLoc,
+               m_compAAWidthLoc);
+    }
   }
 }
 
@@ -735,6 +782,11 @@ void CRenderSystemGLES::ReleaseShaders()
     m_pShader[ShaderMethodGLES::SM_TEXTURE_NOALPHA]->Free();
   m_pShader[ShaderMethodGLES::SM_TEXTURE_NOALPHA].reset();
 
+  // Release rounded composite shader
+  if (m_pShader[ShaderMethodGLES::SM_ROUNDRECT_COMPOSITE])
+    m_pShader[ShaderMethodGLES::SM_ROUNDRECT_COMPOSITE]->Free();
+  m_pShader[ShaderMethodGLES::SM_ROUNDRECT_COMPOSITE].reset();
+
   if (m_pShader[ShaderMethodGLES::SM_STENCIL_ROUNDED_MASK])
     m_pShader[ShaderMethodGLES::SM_STENCIL_ROUNDED_MASK]->Free();
   m_pShader[ShaderMethodGLES::SM_STENCIL_ROUNDED_MASK].reset();
@@ -744,6 +796,21 @@ void CRenderSystemGLES::ReleaseShaders()
     glDeleteBuffers(1, &m_roundMaskVbo);
     m_roundMaskVbo = 0;
   }
+
+  // Free offscreen group resources
+  if (m_groupFbo != 0)
+  {
+    glDeleteFramebuffers(1, &m_groupFbo);
+    m_groupFbo = 0;
+  }
+  if (m_groupTex != 0)
+  {
+    glDeleteTextures(1, &m_groupTex);
+    m_groupTex = 0;
+  }
+  m_groupW = 0;
+  m_groupH = 0;
+  m_groupActive = false;
 }
 
 bool CRenderSystemGLES::BeginStencilClip(const CRect& rectScreenTL, float radiusGui)
@@ -983,6 +1050,192 @@ void CRenderSystemGLES::EndStencilClip()
 
   m_stencilRef = 0;
   glDisable(GL_STENCIL_TEST);
+}
+
+bool CRenderSystemGLES::EnsureGroupFbo(int w, int h)
+{
+  if (w <= 0 || h <= 0)
+    return false;
+
+  if (m_groupFbo != 0 && m_groupTex != 0 && m_groupW == w && m_groupH == h)
+    return true;
+
+  if (m_groupFbo != 0)
+  {
+    glDeleteFramebuffers(1, &m_groupFbo);
+    m_groupFbo = 0;
+  }
+  if (m_groupTex != 0)
+  {
+    glDeleteTextures(1, &m_groupTex);
+    m_groupTex = 0;
+  }
+
+  glGenTextures(1, &m_groupTex);
+  glBindTexture(GL_TEXTURE_2D, m_groupTex);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+  glGenFramebuffers(1, &m_groupFbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_groupFbo);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_groupTex, 0);
+
+  const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  if (status != GL_FRAMEBUFFER_COMPLETE)
+  {
+    CLog::Log(LOGERROR, "GLES: EnsureGroupFbo failed: {}x{} status=0x{:04x}",
+              w, h, static_cast<unsigned int>(status));
+    glDeleteFramebuffers(1, &m_groupFbo);
+    glDeleteTextures(1, &m_groupTex);
+    m_groupFbo = 0;
+    m_groupTex = 0;
+    return false;
+  }
+
+  m_groupW = w;
+  m_groupH = h;
+  CLog::Log(LOGINFO, "GLES: EnsureGroupFbo OK: {}x{} fbo={} tex={}", w, h, m_groupFbo, m_groupTex);
+  return true;
+}
+
+bool CRenderSystemGLES::BeginOffscreenRoundedGroup(const CRect& rectScreenTL, float radiusPx)
+{
+  if (m_groupActive)
+    return false;
+
+  GLint vp[4] = {0, 0, 0, 0};
+  glGetIntegerv(GL_VIEWPORT, vp);
+  const int vpW = vp[2];
+  const int vpH = vp[3];
+  if (vpW <= 0 || vpH <= 0)
+    return false;
+
+  if (!EnsureGroupFbo(vpW, vpH))
+    return false;
+
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &m_prevFbo);
+  std::copy(std::begin(vp), std::end(vp), std::begin(m_prevViewport));
+
+  glBindFramebuffer(GL_FRAMEBUFFER, m_groupFbo);
+  glViewport(0, 0, vpW, vpH);
+
+  glDisable(GL_SCISSOR_TEST);
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glClearColor(0.f, 0.f, 0.f, 0.f);
+  glClear(GL_COLOR_BUFFER_BIT);
+
+  m_offscreenRect = rectScreenTL;
+  m_offscreenRadius = radiusPx;
+  m_groupActive = true;
+  return true;
+}
+
+void CRenderSystemGLES::EndOffscreenRoundedGroup()
+{
+  if (!m_groupActive)
+    return;
+
+  glBindFramebuffer(GL_FRAMEBUFFER, m_prevFbo);
+  glViewport(m_prevViewport[0], m_prevViewport[1], m_prevViewport[2], m_prevViewport[3]);
+
+  const float vpX = static_cast<float>(m_prevViewport[0]);
+  const float vpY = static_cast<float>(m_prevViewport[1]);
+  const float vpW = static_cast<float>(m_prevViewport[2]);
+  const float vpH = static_cast<float>(m_prevViewport[3]);
+
+  // rectScreenTL -> framebuffer bottom-left (with viewport offsets)
+  CRect rectFbBL(m_offscreenRect.x1 + vpX,
+                 vpY + (vpH - m_offscreenRect.y2),
+                 m_offscreenRect.x2 + vpX,
+                 vpY + (vpH - m_offscreenRect.y1));
+
+  if (rectFbBL.x2 < rectFbBL.x1)
+    std::swap(rectFbBL.x1, rectFbBL.x2);
+  if (rectFbBL.y2 < rectFbBL.y1)
+    std::swap(rectFbBL.y1, rectFbBL.y2);
+
+  const float maxR = std::min(rectFbBL.Width(), rectFbBL.Height()) * 0.5f;
+  const float rFb = std::max(0.0f, std::min(m_offscreenRadius, maxR));
+
+  auto* shader = m_pShader[ShaderMethodGLES::SM_STENCIL_ROUNDED_MASK].get();
+  if (!shader || shader->ProgramHandle() == 0 || m_groupTex == 0)
+  {
+    CLog::Log(LOGERROR,
+              "GLES: EndOffscreenRoundedGroup abort: shader/prog/tex missing (shader={} prog={} tex={})",
+              shader != nullptr, shader ? shader->ProgramHandle() : 0u, m_groupTex);
+    m_groupActive = false;
+    return;
+  }
+
+  const GLuint prog = shader->ProgramHandle();
+
+  glEnable(GL_SCISSOR_TEST);
+  glScissor(static_cast<GLint>(std::floor(rectFbBL.x1)),
+            static_cast<GLint>(std::floor(rectFbBL.y1)),
+            std::max(1, static_cast<GLint>(std::ceil(rectFbBL.Width()))),
+            std::max(1, static_cast<GLint>(std::ceil(rectFbBL.Height()))));
+
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, m_groupTex);
+
+  glUseProgram(prog);
+
+  if (m_maskSamplerLoc >= 0)
+    glUniform1i(m_maskSamplerLoc, 0);
+  if (m_maskViewportLoc >= 0)
+    glUniform2f(m_maskViewportLoc, vpW, vpH);
+  if (m_maskRectLoc >= 0)
+    glUniform4f(m_maskRectLoc, rectFbBL.x1, rectFbBL.y1, rectFbBL.x2, rectFbBL.y2);
+  if (m_maskRadiusLoc >= 0)
+    glUniform1f(m_maskRadiusLoc, rFb);
+  if (m_maskAAWidthLoc >= 0)
+    glUniform1f(m_maskAAWidthLoc, 1.0f);
+
+  // Identity matrix for NDC quad
+  const GLint matrixLoc = glGetUniformLocation(prog, "m_matrix");
+  if (matrixLoc >= 0)
+  {
+    const GLfloat I[16] = {
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1
+    };
+    glUniformMatrix4fv(matrixLoc, 1, GL_FALSE, I);
+  }
+
+  const GLfloat verts[8] = {
+      -1.0f, -1.0f,
+       1.0f, -1.0f,
+      -1.0f,  1.0f,
+       1.0f,  1.0f
+  };
+
+  if (m_roundMaskVbo == 0)
+    glGenBuffers(1, &m_roundMaskVbo);
+
+  glBindBuffer(GL_ARRAY_BUFFER, m_roundMaskVbo);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STREAM_DRAW);
+
+  const GLint posLoc = (m_maskPosLoc >= 0) ? m_maskPosLoc : m_roundMaskPosLoc;
+  if (posLoc >= 0)
+  {
+    glEnableVertexAttribArray(posLoc);
+    glVertexAttribPointer(posLoc, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glDisableVertexAttribArray(posLoc);
+  }
+
+  glDisable(GL_SCISSOR_TEST);
+
+  m_groupActive = false;
 }
 
 void CRenderSystemGLES::EnableGUIShader(ShaderMethodGLES method)

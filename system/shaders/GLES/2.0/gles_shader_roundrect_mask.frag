@@ -1,9 +1,15 @@
 #version 100
 precision highp float;
 
+uniform sampler2D m_samp0;
+
+// Viewport size in framebuffer pixels
+uniform vec2  m_viewport;
+
 // Rect in framebuffer pixels, bottom-left origin: x1,y1,x2,y2
 uniform vec4  m_maskRect;
-uniform float m_radius; // radius in framebuffer pixels
+uniform float m_radius;   // radius in framebuffer pixels
+uniform float m_aaWidth;  // AA width in framebuffer pixels (e.g. 1.0)
 
 float sdRoundRect(vec2 p, vec2 b, float r)
 {
@@ -15,6 +21,10 @@ void main()
 {
   vec2 p = gl_FragCoord.xy;
 
+  // Sample full-screen offscreen buffer using framebuffer-relative UVs.
+  vec2 uv = p / max(m_viewport, vec2(1.0, 1.0));
+  vec4 src = texture2D(m_samp0, uv);
+
   vec2 center   = 0.5 * (m_maskRect.xy + m_maskRect.zw);
   vec2 halfSize = 0.5 * (m_maskRect.zw - m_maskRect.xy);
 
@@ -23,8 +33,9 @@ void main()
 
   float d = sdRoundRect(p - center, b, r);
 
-  // DEBUG VISUALISATION:
-  // green = inside rounded rect, red = outside
-  gl_FragColor = (d <= 0.0) ? vec4(0.0, 1.0, 0.0, 1.0)
-                            : vec4(1.0, 0.0, 0.0, 1.0);
+  float aa = max(m_aaWidth, 0.0001);
+  float cov = 1.0 - smoothstep(0.0, aa, d); // inside=1, outside=0
+
+  // Apply coverage to BOTH rgb and alpha (straight alpha pipeline).
+  gl_FragColor = vec4(src.rgb * cov, src.a * cov);
 }

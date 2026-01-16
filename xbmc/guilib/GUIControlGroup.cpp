@@ -113,6 +113,7 @@ void CGUIControlGroup::Render()
   enum class ClipMode
   {
     None,
+    Offscreen,
     Scissor,
     Stencil
   };
@@ -124,9 +125,17 @@ void CGUIControlGroup::Render()
   {
     if (m_cornerRadius > 0.0f)
     {
-      clipped = gfx.SetClipRegionStencilRounded(pos.x, pos.y, m_width, m_height, m_cornerRadius);
+      clipped = gfx.BeginOffscreenRoundedGroup(pos.x, pos.y, m_width, m_height, m_cornerRadius);
       if (clipped)
-        clipMode = ClipMode::Stencil;
+      {
+        clipMode = ClipMode::Offscreen;
+      }
+      else
+      {
+        clipped = gfx.SetClipRegionStencilRounded(pos.x, pos.y, m_width, m_height, m_cornerRadius);
+        if (clipped)
+          clipMode = ClipMode::Stencil;
+      }
     }
 
     if (!clipped)
@@ -170,7 +179,9 @@ void CGUIControlGroup::Render()
 
   if (clipped)
   {
-    if (clipMode == ClipMode::Stencil)
+    if (clipMode == ClipMode::Offscreen)
+      gfx.EndOffscreenRoundedGroup();
+    else if (clipMode == ClipMode::Stencil)
       gfx.RestoreClipRegionStencil();
     else if (clipMode == ClipMode::Scissor)
       gfx.RestoreClipRegionScissor();
@@ -188,6 +199,7 @@ void CGUIControlGroup::RenderEx()
   enum class ClipMode
   {
     None,
+    Offscreen,
     Scissor,
     Stencil
   };
@@ -199,9 +211,17 @@ void CGUIControlGroup::RenderEx()
   {
     if (m_cornerRadius > 0.0f)
     {
-      clipped = gfx.SetClipRegionStencilRounded(pos.x, pos.y, m_width, m_height, m_cornerRadius);
+      clipped = gfx.BeginOffscreenRoundedGroup(pos.x, pos.y, m_width, m_height, m_cornerRadius);
       if (clipped)
-        clipMode = ClipMode::Stencil;
+      {
+        clipMode = ClipMode::Offscreen;
+      }
+      else
+      {
+        clipped = gfx.SetClipRegionStencilRounded(pos.x, pos.y, m_width, m_height, m_cornerRadius);
+        if (clipped)
+          clipMode = ClipMode::Stencil;
+      }
     }
 
     if (!clipped)
@@ -222,7 +242,9 @@ void CGUIControlGroup::RenderEx()
 
   if (clipped)
   {
-    if (clipMode == ClipMode::Stencil)
+    if (clipMode == ClipMode::Offscreen)
+      gfx.EndOffscreenRoundedGroup();
+    else if (clipMode == ClipMode::Stencil)
       gfx.RestoreClipRegionStencil();
     else if (clipMode == ClipMode::Scissor)
       gfx.RestoreClipRegionScissor();
