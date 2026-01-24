@@ -14,6 +14,7 @@
 #include "utils/Map.h"
 
 #include <map>
+#include <vector>
 #include <memory>
 
 #include <fmt/format.h>
@@ -30,6 +31,7 @@ enum class ShaderMethodGL
   SM_FONTS_SHADER_CLIP,
   SM_TEXTURE_NOBLEND,
   SM_MULTI_BLENDCOLOR,
+  SM_ROUNDRECT_MASK,
   SM_MAX
 };
 
@@ -56,6 +58,7 @@ private:
       {ShaderMethodGL::SM_FONTS_SHADER_CLIP, "fonts with vertex shader based clipping"},
       {ShaderMethodGL::SM_TEXTURE_NOBLEND, "texture no blending"},
       {ShaderMethodGL::SM_MULTI_BLENDCOLOR, "multi blend colour"},
+      {ShaderMethodGL::SM_ROUNDRECT_MASK, "roundrect_mask"},
   });
 
   static_assert(static_cast<size_t>(ShaderMethodGL::SM_MAX) == ShaderMethodGLMap.size(),
@@ -89,6 +92,9 @@ public:
   CRect ClipRectToScissorRect(const CRect &rect) override;
   void SetScissors(const CRect &rect) override;
   void ResetScissors() override;
+
+  bool BeginOffscreenRoundedGroup(const CRect& rectScreenTL, float radiusPx) override;
+  void EndOffscreenRoundedGroup() override;
 
   void SetDepthCulling(DEPTH_CULLING culling) override;
 
@@ -143,6 +149,40 @@ protected:
   GLint m_viewPort[4];
 
   std::map<ShaderMethodGL, std::unique_ptr<CGLShader>> m_pShader;
+
+  // Round-rect mask shader locations (SM_ROUNDRECT_MASK).
+  GLint m_maskRectLoc{-1};      // m_maskRect
+  GLint m_maskRadiusLoc{-1};    // m_radius
+  GLint m_maskAAWidthLoc{-1};   // m_aaWidth
+  GLint m_maskViewportLoc{-1};  // m_viewport (vec4 x,y,w,h)
+  GLint m_maskSamplerLoc{-1};   // m_samp0
+  GLint m_maskMatrixLoc{-1};    // m_matrix
+  GLint m_roundMaskPosLoc{-1};  // m_attrpos
+
+  // Fullscreen quad resources for round-rect composite (core profile wants VAO).
+  GLuint m_roundMaskVao{0};
+  GLuint m_roundMaskVbo{0};
+
+  // Offscreen rounded group helpers (GL only).
+  bool EnsureGroupFbo(int w, int h);
+
+  // Offscreen render target (RGBA).
+  GLuint m_groupFbo{0};
+  GLuint m_groupTex{0};
+  int m_groupW{0};
+  int m_groupH{0};
+
+  struct OffscreenGroupState
+  {
+    GLint prevFbo{0};
+    GLint prevViewport[4]{0, 0, 0, 0};
+    CRect rectScreenTL;
+    float radiusPx{0.0f};
+  };
+
+  // Allow nested rounded groups safely.
+  std::vector<OffscreenGroupState> m_groupStack;
+  
   ShaderMethodGL m_method = ShaderMethodGL::SM_DEFAULT;
   GLuint m_vertexArray = GL_NONE;
 };
