@@ -43,6 +43,33 @@ struct GLCompositeStateGuard : public ROUNDRECT::GLCompositeStateGuardBase
 {
   ~GLCompositeStateGuard() { RestoreCommon(); }
 };
+
+// Helper to normalize per-corner radii for a rectangle of size w,h.
+static std::array<float, 4> NormalizeCornerRadii(std::array<float, 4> radii, float w, float h)
+{
+  const float maxR = std::max(0.0f, std::min(w, h) * 0.5f);
+  for (auto& r : radii)
+    r = std::max(0.0f, std::min(r, maxR));
+
+  auto fixPair = [&](float& a, float& b, float limit)
+  {
+    const float sum = a + b;
+    if (sum > limit && sum > 0.0f)
+    {
+      const float s = limit / sum;
+      a *= s;
+      b *= s;
+    }
+  };
+
+  // tl,tr top; bl,br bottom; tl,bl left; tr,br right
+  fixPair(radii[0], radii[1], w);
+  fixPair(radii[3], radii[2], w);
+  fixPair(radii[0], radii[3], h);
+  fixPair(radii[1], radii[2], h);
+
+  return radii;
+}
 } // namespace
 
 CRenderSystemGLES::CRenderSystemGLES()
@@ -642,8 +669,7 @@ void CRenderSystemGLES::InitialiseShaders()
     CLog::Log(LOGINFO, "GLES GUI Shader roundrect mask compiled OK");
     const GLuint prog = m_pShader[ShaderMethodGLES::SM_ROUNDRECT_MASK]->ProgramHandle();
     m_maskRectLoc = glGetUniformLocation(prog, "m_maskRect");
-    m_maskRadiusLoc = glGetUniformLocation(prog, "m_radius");
-    // Extra uniforms used by offscreen composite (shader reuse)
+    m_maskRadiiLoc = glGetUniformLocation(prog, "m_radii");
     m_maskSamplerLoc = glGetUniformLocation(prog, "m_samp0");
     m_maskViewportLoc = glGetUniformLocation(prog, "m_viewport");
     m_maskAAWidthLoc = glGetUniformLocation(prog, "m_aaWidth");
@@ -799,6 +825,11 @@ bool CRenderSystemGLES::EnsureGroupFbo(int w, int h)
 
 bool CRenderSystemGLES::BeginOffscreenRoundedGroup(const CRect& rectScreenTL, float radiusPx)
 {
+  return BeginOffscreenRoundedGroup(rectScreenTL, std::array<float, 4>{radiusPx, radiusPx, radiusPx, radiusPx});
+}
+
+bool CRenderSystemGLES::BeginOffscreenRoundedGroup(const CRect& rectScreenTL, const std::array<float, 4>& radiiPx)
+{
   GLint vp[4] = {0, 0, 0, 0};
   glGetIntegerv(GL_VIEWPORT, vp);
   const int vpW = vp[2];
@@ -816,7 +847,7 @@ bool CRenderSystemGLES::BeginOffscreenRoundedGroup(const CRect& rectScreenTL, fl
   state.prevViewport[2] = vp[2];
   state.prevViewport[3] = vp[3];
   state.rectScreenTL = rectScreenTL;
-  state.radiusPx = radiusPx;
+  state.radiiPx = radiiPx;
 
   m_groupStack.emplace_back(state);
 
@@ -871,7 +902,9 @@ void CRenderSystemGLES::EndOffscreenRoundedGroup()
   // rectScreenTL -> framebuffer bottom-left (with viewport offsets)
   const CRect rectFbBL = ROUNDRECT::ScreenTLToFramebufferBL(state.rectScreenTL, state.prevViewport);
 
-  const float rFb = ROUNDRECT::ClampRadiusToRect(state.radiusPx, rectFbBL);
+  const float w = rectFbBL.Width();
+  const float h = rectFbBL.Height();
+  const std::array<float, 4> radii = NormalizeCornerRadii(state.radiiPx, w, h);
 
   auto* shader = m_pShader[ShaderMethodGLES::SM_ROUNDRECT_MASK].get();
   if (!shader || shader->ProgramHandle() == 0 || m_groupTex == 0)
@@ -912,8 +945,8 @@ void CRenderSystemGLES::EndOffscreenRoundedGroup()
     glUniform4f(m_maskRectLoc,
                 rectFbBL.x1 + 0.5f, rectFbBL.y1 + 0.5f,
                 rectFbBL.x2 - 0.5f, rectFbBL.y2 - 0.5f);
-  if (m_maskRadiusLoc >= 0)
-    glUniform1f(m_maskRadiusLoc, rFb);
+  if (m_maskRadiiLoc >= 0)
+    glUniform4f(m_maskRadiiLoc, radii[0], radii[1], radii[2], radii[3]);
   if (m_maskAAWidthLoc >= 0)
     glUniform1f(m_maskAAWidthLoc, kRoundRectAAWidth);
 

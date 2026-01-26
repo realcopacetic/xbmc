@@ -13,6 +13,7 @@
 #include "utils/Geometry.h"
 
 #include <memory>
+#include <array>
 #include <string>
 
 /*
@@ -59,6 +60,8 @@ public:
 
   // Render group to an offscreen target and composite it back with a round-rect mask (AA-capable).
   virtual bool BeginOffscreenRoundedGroup(const CRect& rectScreenTL, float radiusPx) { return false; }
+  virtual bool BeginOffscreenRoundedGroup(const CRect& rectScreenTL,
+                                          const std::array<float, 4>& radiiPx) { return BeginOffscreenRoundedGroup(rectScreenTL, radiiPx[0]); }
   virtual void EndOffscreenRoundedGroup() {}
 
   virtual void SetDepthCulling(DEPTH_CULLING culling) {}

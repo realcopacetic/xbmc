@@ -142,6 +142,15 @@ void CGraphicContext::RestoreClipRegionScissor()
 
 bool CGraphicContext::BeginOffscreenRoundedGroup(float x, float y, float w, float h, float radiusGui)
 {
+  return BeginOffscreenRoundedGroup(x, y, w, h, std::array<float, 4>{radiusGui, radiusGui, radiusGui, radiusGui});
+}
+
+bool CGraphicContext::BeginOffscreenRoundedGroup(float x,
+                                                 float y,
+                                                 float w,
+                                                 float h,
+                                                 const std::array<float, 4>& radiiGui)
+{
   if (w <= 0.0f || h <= 0.0f)
     return false;
 
@@ -159,23 +168,29 @@ bool CGraphicContext::BeginOffscreenRoundedGroup(float x, float y, float w, floa
 
   const CRect rectScreenTL(x1, y1, x2, y2);
 
-  // Radius must be in the same coord space as rectScreenTL (post ScaleFinalCoords()).
-  float radiusScreen = 0.0f;
-  if (radiusGui > 0.0f)
+  auto scaleRadius = [&](float rGui) -> float
   {
-    float ax0 = 0.0f, ay0 = 0.0f;
-    float ax1 = radiusGui, ay1 = radiusGui;
-    float az = 0.0f;
+    if (rGui <= 0.0f)
+      return 0.0f;
 
+    float ax0 = 0.0f, ay0 = 0.0f;
+    float ax1 = rGui, ay1 = rGui;
+    float az = 0.0f;
     ScaleFinalCoords(ax0, ay0, az);
     ScaleFinalCoords(ax1, ay1, az);
+    const float scaleX = std::abs(ax1 - ax0) / rGui;
+    const float scaleY = std::abs(ay1 - ay0) / rGui;
+    return rGui * std::min(scaleX, scaleY);
+  };
 
-    const float scaleX = std::abs(ax1 - ax0) / radiusGui;
-    const float scaleY = std::abs(ay1 - ay0) / radiusGui;
-    radiusScreen = radiusGui * std::min(scaleX, scaleY);
-  }
-
-  return CServiceBroker::GetRenderSystem()->BeginOffscreenRoundedGroup(rectScreenTL, radiusScreen);
+  std::array<float, 4> radiiScreen{
+    scaleRadius(radiiGui[0]),
+    scaleRadius(radiiGui[1]),
+    scaleRadius(radiiGui[2]),
+    scaleRadius(radiiGui[3])
+  };
+  
+  return CServiceBroker::GetRenderSystem()->BeginOffscreenRoundedGroup(rectScreenTL, radiiScreen);
 }
 
 void CGraphicContext::EndOffscreenRoundedGroup()

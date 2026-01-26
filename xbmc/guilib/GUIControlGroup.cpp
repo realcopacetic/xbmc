@@ -13,6 +13,7 @@
 #include "input/mouse/MouseEvent.h"
 #include "windowing/WinSystem.h"
 
+#include <array>
 #include <cassert>
 #include <utility>
 
@@ -44,7 +45,7 @@ CGUIControlGroup::CGUIControlGroup(const CGUIControlGroup &from)
   m_defaultAlways = from.m_defaultAlways;
   m_renderFocusedLast = from.m_renderFocusedLast;
   m_clipping = from.m_clipping;
-  m_cornerRadius = from.m_cornerRadius;
+  m_cornerRadii = from.m_cornerRadii;
   m_transformChildren = from.m_transformChildren;
 
   // run through and add our controls
@@ -122,14 +123,16 @@ namespace
                           float width,
                           float height,
                           bool clipping,
-                          float cornerRadius)
+                          const std::array<float, 4>& cornerRadii)
   {
     if (!clipping)
       return ClipMode::None;
 
-    if (cornerRadius > 0.0f)
+    const bool anyRadius = (cornerRadii[0] > 0.0f || cornerRadii[1] > 0.0f ||
+                            cornerRadii[2] > 0.0f || cornerRadii[3] > 0.0f);
+    if (anyRadius)
     {
-      if (gfx.BeginOffscreenRoundedGroup(pos.x, pos.y, width, height, cornerRadius))
+      if (gfx.BeginOffscreenRoundedGroup(pos.x, pos.y, width, height, cornerRadii))
         return ClipMode::Offscreen;
     }
 
@@ -155,9 +158,9 @@ namespace
                    float width,
                    float height,
                    bool clipping,
-                   float cornerRadius)
+                   const std::array<float, 4>& cornerRadii)
       : m_gfx(gfx),
-        m_clipMode(BeginGroupClip(gfx, pos, width, height, clipping, cornerRadius))
+        m_clipMode(BeginGroupClip(gfx, pos, width, height, clipping, cornerRadii))
     {
       m_gfx.SetOrigin(pos.x, pos.y);
     }
@@ -182,7 +185,7 @@ void CGUIControlGroup::Render()
   const CPoint pos(GetPosition());
   CGraphicContext& gfx = CServiceBroker::GetWinSystem()->GetGfxContext();
 
-  GroupClipScope scope(gfx, pos, m_width, m_height, m_clipping, m_cornerRadius);
+  GroupClipScope scope(gfx, pos, m_width, m_height, m_clipping, m_cornerRadii);
   CGUIControl* focusedControl = nullptr;
   if (gfx.GetRenderOrder() == RENDER_ORDER_FRONT_TO_BACK)
   {
@@ -214,7 +217,7 @@ void CGUIControlGroup::RenderEx()
   const CPoint pos(GetPosition());
   CGraphicContext& gfx = CServiceBroker::GetWinSystem()->GetGfxContext();
 
-  GroupClipScope scope(gfx, pos, m_width, m_height, m_clipping, m_cornerRadius);
+  GroupClipScope scope(gfx, pos, m_width, m_height, m_clipping, m_cornerRadii);
 
   for (auto* control : m_children)
     control->RenderEx();

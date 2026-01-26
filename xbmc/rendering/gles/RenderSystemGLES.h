@@ -14,6 +14,7 @@
 #include "utils/Map.h"
 
 #include <map>
+#include <array>
 #include <vector>
 
 #include <fmt/format.h>
@@ -114,6 +115,7 @@ public:
   void ResetScissors() override;
 
   bool BeginOffscreenRoundedGroup(const CRect& rectScreenTL, float radiusPx) override;
+  bool BeginOffscreenRoundedGroup(const CRect& rectScreenTL, const std::array<float, 4>& radiiPx) override;
   void EndOffscreenRoundedGroup() override;
   void SetDepthCulling(DEPTH_CULLING culling) override;
 
@@ -164,7 +166,7 @@ protected:
   
   // Round-rect mask shader locations (SM_ROUNDRECT_MASK).
   GLint m_maskRectLoc{-1};      // m_maskRect
-  GLint m_maskRadiusLoc{-1};    // m_radius
+  GLint m_maskRadiiLoc{-1};     // m_radii (vec4 tl,tr,br,bl)
   GLint m_maskAAWidthLoc{-1};   // m_aaWidth
   GLint m_maskViewportLoc{-1};  // m_viewport (vec4 x,y,w,h)
   GLint m_maskSamplerLoc{-1};   // m_samp0
@@ -188,7 +190,7 @@ protected:
     GLint prevFbo{0};
     GLint prevViewport[4]{0, 0, 0, 0};
     CRect rectScreenTL;
-    float radiusPx{0.0f};
+    std::array<float, 4> radiiPx{0.0f, 0.0f, 0.0f, 0.0f};
   };
 
   // Allow nested rounded groups safely.

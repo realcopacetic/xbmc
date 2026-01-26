@@ -15,6 +15,8 @@
 #include "utils/Geometry.h" // for CRect/CPoint
 #include "utils/TransformMatrix.h" // for the members m_guiTransform etc.
 
+#include <array>
+#include <map>
 #include <stack>
 #include <string>
 #include <vector>
@@ -203,6 +205,7 @@ public:
   bool SetClipRegionScissor(float x, float y, float w, float h);
   void RestoreClipRegionScissor();
   bool BeginOffscreenRoundedGroup(float x, float y, float w, float h, float radiusGui);
+  bool BeginOffscreenRoundedGroup(float x, float y, float w, float h, const std::array<float, 4>& radiiGui);
   void EndOffscreenRoundedGroup();
 
   void AddGUITransform();
