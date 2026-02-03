@@ -2,7 +2,9 @@
 
 uniform sampler2D m_samp0;
 
-// Viewport in framebuffer pixels: x, y, w, h (bottom-left origin)
+// Texture mapping rect in framebuffer pixels:
+// xy = origin (rectFbBL.x1 - pad, rectFbBL.y1 - pad)
+// zw = offscreen RT size (w,h)
 uniform vec4  m_viewport;
 
 // Rect in framebuffer pixels, bottom-left origin: x1,y1,x2,y2

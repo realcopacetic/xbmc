@@ -166,14 +166,21 @@ protected:
   GLuint m_roundMaskVao{0};
   GLuint m_roundMaskVbo{0};
 
-  // Offscreen rounded group helpers (GL only).
-  bool EnsureGroupFbo(int w, int h);
+  struct OffscreenTarget
+  {
+    GLuint fbo{0};
+    GLuint tex{0};
+    int w{0};
+    int h{0};
+    bool inUse{false};
+  };
 
-  // Offscreen render target (RGBA).
-  GLuint m_groupFbo{0};
-  GLuint m_groupTex{0};
-  int m_groupW{0};
-  int m_groupH{0};
+  // Offscreen rounded group helpers (GL only).
+  int AcquireGroupTarget(int w, int h);
+  void ReleaseGroupTarget(int index);
+
+  // Small render-target pool (RGBA). Reused across independent groups and supports nesting.
+  std::vector<OffscreenTarget> m_groupPool;
 
   struct OffscreenGroupState
   {
@@ -181,6 +188,14 @@ protected:
     GLint prevViewport[4]{0, 0, 0, 0};
     CRect rectScreenTL;
     std::array<float, 4> radiiPx{0.0f, 0.0f, 0.0f, 0.0f};
+    int targetIndex{-1};
+    float padPx{0.0f};
+    GLint offscreenOriginX{0};
+    GLint offscreenOriginY{0};
+
+    // Scissor state from BEFORE entering the offscreen rounded pass.
+    GLboolean prevScissorEnabled{GL_FALSE};
+    GLint prevScissorBox[4]{0, 0, 0, 0};
   };
 
   // Allow nested rounded groups safely.

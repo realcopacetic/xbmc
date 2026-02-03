@@ -24,6 +24,7 @@
 #include "utils/log.h"
 #include "windowing/WinSystem.h"
 
+#include <algorithm>
 #include <exception>
 
 #if defined(TARGET_LINUX)
@@ -36,6 +37,22 @@ namespace
 {
 // AA ramp width in framebuffer pixels for rounded-rect mask
 constexpr float kRoundRectAAWidth = 1.25f;
+constexpr size_t kMaxRoundedGroupTargets = 8;
+
+template<typename T>
+static void DeleteOffscreenTarget(T& t)
+{
+  if (t.fbo != 0)
+  {
+    glDeleteFramebuffers(1, &t.fbo);
+    t.fbo = 0;
+  }
+  if (t.tex != 0)
+  {
+    glDeleteTextures(1, &t.tex);
+    t.tex = 0;
+  }
+}
 
 class CGLVertexAttribGuard
 {
@@ -612,7 +629,38 @@ void CRenderSystemGL::SetScissors(const CRect &rect)
   GLint y1 = MathUtils::round_int(static_cast<double>(rect.y1));
   GLint x2 = MathUtils::round_int(static_cast<double>(rect.x2));
   GLint y2 = MathUtils::round_int(static_cast<double>(rect.y2));
-  glScissor(x1, m_height - y2, x2-x1, y2-y1);
+
+  GLint sx = x1;
+  GLint sy = m_height - y2;
+  GLint sw = x2 - x1;
+  GLint sh = y2 - y1;
+
+  // Remap into offscreen RT local space when rounded-group rendering uses a shifted viewport.
+  if (!m_groupStack.empty())
+  {
+    const auto& g = m_groupStack.back();
+    if (g.targetIndex >= 0 && g.targetIndex < static_cast<int>(m_groupPool.size()))
+    {
+      const auto& t = m_groupPool[static_cast<size_t>(g.targetIndex)];
+
+      sx -= g.offscreenOriginX;
+      sy -= g.offscreenOriginY;
+
+      // Clamp to RT bounds.
+      const GLint x1c = std::max<GLint>(0, sx);
+      const GLint y1c = std::max<GLint>(0, sy);
+      const GLint x2c = std::min<GLint>(t.w, sx + sw);
+      const GLint y2c = std::min<GLint>(t.h, sy + sh);
+      sx = x1c;
+      sy = y1c;
+      sw = std::max<GLint>(0, x2c - x1c);
+      sh = std::max<GLint>(0, y2c - y1c);
+    }
+  }
+
+  sw = std::max<GLint>(0, sw);
+  sh = std::max<GLint>(0, sh);
+  glScissor(sx, sy, sw, sh);
 }
 
 void CRenderSystemGL::ResetScissors()
@@ -928,68 +976,113 @@ void CRenderSystemGL::ReleaseShaders()
     m_roundMaskVao = 0;
   }
 
-  if (m_groupFbo != 0)
+  for (auto& t : m_groupPool)
   {
-    glDeleteFramebuffers(1, &m_groupFbo);
-    m_groupFbo = 0;
+    DeleteOffscreenTarget(t);
   }
-  if (m_groupTex != 0)
-  {
-    glDeleteTextures(1, &m_groupTex);
-    m_groupTex = 0;
-  }
-  m_groupW = 0;
-  m_groupH = 0;
+  m_groupPool.clear();
   m_groupStack.clear();
 }
 
-bool CRenderSystemGL::EnsureGroupFbo(int w, int h)
+int CRenderSystemGL::AcquireGroupTarget(int w, int h)
 {
   if (w <= 0 || h <= 0)
-    return false;
+    return -1;
 
-  if (m_groupFbo != 0 && m_groupTex != 0 && m_groupW == w && m_groupH == h)
-    return true;
-
-  if (m_groupFbo != 0)
+  // Fast path: exact match.
+  for (size_t i = 0; i < m_groupPool.size(); ++i)
   {
-    glDeleteFramebuffers(1, &m_groupFbo);
-    m_groupFbo = 0;
-  }
-  if (m_groupTex != 0)
-  {
-    glDeleteTextures(1, &m_groupTex);
-    m_groupTex = 0;
+    auto& t = m_groupPool[i];
+    if (!t.inUse && t.fbo != 0 && t.tex != 0 && t.w == w && t.h == h)
+    {
+      t.inUse = true;
+      return static_cast<int>(i);
+    }
   }
 
-  glGenTextures(1, &m_groupTex);
-  glBindTexture(GL_TEXTURE_2D, m_groupTex);
+  // Best-fit reuse: take the smallest unused target that can fit the request.
+  size_t best = static_cast<size_t>(-1);
+  int bestArea = 0;
+  for (size_t i = 0; i < m_groupPool.size(); ++i)
+  {
+    auto& t = m_groupPool[i];
+    if (t.inUse || t.fbo == 0 || t.tex == 0)
+      continue;
+    if (t.w < w || t.h < h)
+      continue;
+    const int area = t.w * t.h;
+    if (best == static_cast<size_t>(-1) || area < bestArea)
+    {
+      best = i;
+      bestArea = area;
+    }
+  }
+  if (best != static_cast<size_t>(-1))
+  {
+    auto& t = m_groupPool[best];
+    t.inUse = true;
+    return static_cast<int>(best);
+  }
+
+  OffscreenTarget t;
+  t.w = w;
+  t.h = h;
+  t.inUse = true;
+
+  glGenTextures(1, &t.tex);
+  glBindTexture(GL_TEXTURE_2D, t.tex);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-  glGenFramebuffers(1, &m_groupFbo);
-  glBindFramebuffer(GL_FRAMEBUFFER, m_groupFbo);
-  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_groupTex, 0);
+  glGenFramebuffers(1, &t.fbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, t.fbo);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t.tex, 0);
 
   const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   if (status != GL_FRAMEBUFFER_COMPLETE)
   {
-    CLog::Log(LOGERROR, "GL: EnsureGroupFbo failed: {}x{} status=0x{:04x}", w, h,
+    CLog::Log(LOGERROR, "GL: AcquireGroupTarget failed: {}x{} status=0x{:04x}", w, h,
               static_cast<unsigned int>(status));
-    glDeleteFramebuffers(1, &m_groupFbo);
-    glDeleteTextures(1, &m_groupTex);
-    m_groupFbo = 0;
-    m_groupTex = 0;
-    return false;
+    glDeleteFramebuffers(1, &t.fbo);
+    glDeleteTextures(1, &t.tex);
+    return -1;
   }
 
-  m_groupW = w;
-  m_groupH = h;
-  return true;
+  m_groupPool.emplace_back(t);
+  const int index = static_cast<int>(m_groupPool.size() - 1);
+  CLog::Log(LOGDEBUG, "GL: rounded-clip RT alloc idx={} {}x{}", index, w, h);
+
+  // Keep the pool bounded: prune unused targets if we exceed the cap.
+  // (Avoid unbounded growth when many sizes are encountered over time.)
+  while (m_groupPool.size() > kMaxRoundedGroupTargets)
+  {
+    bool pruned = false;
+    for (auto it = m_groupPool.begin(); it != m_groupPool.end(); ++it)
+    {
+      if (!it->inUse)
+      {
+        DeleteOffscreenTarget(*it);
+        m_groupPool.erase(it);
+        pruned = true;
+        break;
+      }
+    }
+    if (!pruned)
+      break; // All in use (nested); don't prune.
+  }
+
+  return index;
+}
+
+void CRenderSystemGL::ReleaseGroupTarget(int index)
+{
+  if (index < 0 || index >= static_cast<int>(m_groupPool.size()))
+    return;
+  m_groupPool[static_cast<size_t>(index)].inUse = false;
 }
 
 bool CRenderSystemGL::BeginOffscreenRoundedGroup(const CRect& rectScreenTL, float radiusPx)
@@ -1008,27 +1101,35 @@ bool CRenderSystemGL::BeginOffscreenRoundedGroup(const CRect& rectScreenTL,
   if (vpW <= 0 || vpH <= 0)
     return false;
 
-  if (!EnsureGroupFbo(vpW, vpH))
+  // rectScreenTL -> framebuffer bottom-left (with viewport offsets)
+  const CRect rectFbBL = ROUNDRECT::ScreenTLToFramebufferBL(rectScreenTL, vp);
+  const float pad = std::ceil(kRoundRectAAWidth);
+  const int rtW = std::max(1, static_cast<int>(std::ceil(rectFbBL.Width() + 2.0f * pad)));
+  const int rtH = std::max(1, static_cast<int>(std::ceil(rectFbBL.Height() + 2.0f * pad)));
+
+  const int targetIndex = AcquireGroupTarget(rtW, rtH);
+  if (targetIndex < 0)
     return false;
+  auto& target = m_groupPool[static_cast<size_t>(targetIndex)];
 
   OffscreenGroupState state;
   glGetIntegerv(GL_FRAMEBUFFER_BINDING, &state.prevFbo);
-  state.prevViewport[0] = vp[0];
-  state.prevViewport[1] = vp[1];
-  state.prevViewport[2] = vp[2];
-  state.prevViewport[3] = vp[3];
+  std::copy(std::begin(vp), std::end(vp), std::begin(state.prevViewport));
   state.rectScreenTL = rectScreenTL;
   state.radiiPx = radiiPx;
-  m_groupStack.emplace_back(state);
+  state.targetIndex = targetIndex;
+  state.padPx = pad;
+  state.offscreenOriginX = static_cast<GLint>(std::floor(rectFbBL.x1 - pad));
+  state.offscreenOriginY = static_cast<GLint>(std::floor(rectFbBL.y1 - pad));
 
-  glBindFramebuffer(GL_FRAMEBUFFER, m_groupFbo);
-  glViewport(0, 0, vpW, vpH);
+  glBindFramebuffer(GL_FRAMEBUFFER, target.fbo);
+  // Clear using an RT-local viewport (avoids "viewport larger than FBO" slow paths on some drivers).
+  glViewport(0, 0, rtW, rtH);
 
   // Clear scratch FBO without leaking scissor/color-mask state into offscreen child rendering.
-  const GLboolean prevScissor = glIsEnabled(GL_SCISSOR_TEST);
-  GLint prevScissorBox[4] = {0, 0, 0, 0};
-  if (prevScissor)
-    glGetIntegerv(GL_SCISSOR_BOX, prevScissorBox);
+  state.prevScissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
+  if (state.prevScissorEnabled)
+    glGetIntegerv(GL_SCISSOR_BOX, state.prevScissorBox);
 
   GLboolean prevColorMask[4] = {GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
   glGetBooleanv(GL_COLOR_WRITEMASK, prevColorMask);
@@ -1038,11 +1139,19 @@ bool CRenderSystemGL::BeginOffscreenRoundedGroup(const CRect& rectScreenTL,
   glClearColor(0.f, 0.f, 0.f, 0.f);
   glClear(GL_COLOR_BUFFER_BIT);
 
-  if (prevScissor)
+  // Shift viewport so screen-space rendering lands inside the small RT.
+  glViewport(-static_cast<GLint>(std::floor(rectFbBL.x1 - pad)),
+             -static_cast<GLint>(std::floor(rectFbBL.y1 - pad)), vpW, vpH);
+
+  if (state.prevScissorEnabled)
   {
     glEnable(GL_SCISSOR_TEST);
-    glScissor(prevScissorBox[0], prevScissorBox[1], prevScissorBox[2], prevScissorBox[3]);
+    glScissor(0, 0, rtW, rtH);
   }
+
+  // Only push state once we know the offscreen target is set up.
+  m_groupStack.emplace_back(state);
+
   glColorMask(prevColorMask[0], prevColorMask[1], prevColorMask[2], prevColorMask[3]);
 
   return true;
@@ -1053,19 +1162,34 @@ void CRenderSystemGL::EndOffscreenRoundedGroup()
   if (m_groupStack.empty())
     return;
 
-  GLCompositeStateGuard guard;
-
   const OffscreenGroupState state = m_groupStack.back();
   m_groupStack.pop_back();
 
-  glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(state.prevFbo));
-  glViewport(state.prevViewport[0], state.prevViewport[1], state.prevViewport[2],
-             state.prevViewport[3]);
+  const int idx = state.targetIndex;
+  if (idx < 0 || idx >= static_cast<int>(m_groupPool.size()))
+    return;
+  auto& target = m_groupPool[static_cast<size_t>(idx)];
 
-  const float vpX = static_cast<float>(state.prevViewport[0]);
-  const float vpY = static_cast<float>(state.prevViewport[1]);
-  const float vpW = static_cast<float>(state.prevViewport[2]);
-  const float vpH = static_cast<float>(state.prevViewport[3]);
+  auto restorePreOffscreenScissor = [&state]()
+  {
+    if (state.prevScissorEnabled)
+    {
+      glEnable(GL_SCISSOR_TEST);
+      glScissor(state.prevScissorBox[0], state.prevScissorBox[1],
+                state.prevScissorBox[2], state.prevScissorBox[3]);
+    }
+    else
+    {
+      glDisable(GL_SCISSOR_TEST);
+    }
+  };
+
+  {
+    GLCompositeStateGuard guard;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(state.prevFbo));
+    glViewport(state.prevViewport[0], state.prevViewport[1], state.prevViewport[2],
+               state.prevViewport[3]);
 
   // rectScreenTL -> framebuffer bottom-left (with viewport offsets)
   const CRect rectFbBL = ROUNDRECT::ScreenTLToFramebufferBL(state.rectScreenTL, state.prevViewport);
@@ -1075,35 +1199,61 @@ void CRenderSystemGL::EndOffscreenRoundedGroup()
   const std::array<float, 4> radii = NormalizeCornerRadii(state.radiiPx, w, h);
 
   auto* shader = m_pShader[ShaderMethodGL::SM_ROUNDRECT_MASK].get();
-  if (!shader || shader->ProgramHandle() == 0 || m_groupTex == 0)
+  if (!shader || shader->ProgramHandle() == 0 || target.tex == 0)
   {
     CLog::Log(
         LOGERROR,
         "GL: EndOffscreenRoundedGroup abort: shader/prog/tex missing (shader={} prog={} tex={})",
-        shader != nullptr, shader ? shader->ProgramHandle() : 0u, m_groupTex);
+        shader != nullptr, shader ? shader->ProgramHandle() : 0u, target.tex);
+    ReleaseGroupTarget(idx);
+    // Guard will restore RT-local scissor; overwrite with pre-offscreen scissor after scope.
     return;
   }
 
   const GLuint prog = shader->ProgramHandle();
 
+  const float aaPad = state.padPx;
+
+  // Composite scissor box (framebuffer pixels, BL origin).
+  GLint sx = static_cast<GLint>(std::floor(rectFbBL.x1 - aaPad));
+  GLint sy = static_cast<GLint>(std::floor(rectFbBL.y1 - aaPad));
+  GLint sw = std::max(1, static_cast<GLint>(std::ceil(rectFbBL.Width() + 2.0f * aaPad)));
+  GLint sh = std::max(1, static_cast<GLint>(std::ceil(rectFbBL.Height() + 2.0f * aaPad)));
+
+  // Intersect with the scissor that was active BEFORE we entered the offscreen pass.
+  // The current GL scissor box may be RT-local due to SetScissors() remapping.
+  const GLboolean hadScissor = state.prevScissorEnabled;
+  const GLint* prevScissor = state.prevScissorBox;
+
   glEnable(GL_SCISSOR_TEST);
-  const float aaPad = std::ceil(kRoundRectAAWidth);
-  glScissor(static_cast<GLint>(std::floor(rectFbBL.x1 - aaPad)),
-            static_cast<GLint>(std::floor(rectFbBL.y1 - aaPad)),
-            std::max(1, static_cast<GLint>(std::ceil(rectFbBL.Width() + 2.0f * aaPad))),
-            std::max(1, static_cast<GLint>(std::ceil(rectFbBL.Height() + 2.0f * aaPad))));
+  if (hadScissor)
+  {
+    const GLint x1 = std::max(sx, prevScissor[0]);
+    const GLint y1 = std::max(sy, prevScissor[1]);
+    const GLint x2 = std::min(sx + sw, prevScissor[0] + prevScissor[2]);
+    const GLint y2 = std::min(sy + sh, prevScissor[1] + prevScissor[3]);
+    sx = x1;
+    sy = y1;
+    sw = std::max(1, x2 - x1);
+    sh = std::max(1, y2 - y1);
+  }
+  glScissor(sx, sy, sw, sh);
 
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, m_groupTex);
+  glBindTexture(GL_TEXTURE_2D, target.tex);
 
   glUseProgram(prog);
   if (m_maskSamplerLoc >= 0)
     glUniform1i(m_maskSamplerLoc, 0);
+  // m_viewport is now a texture-mapping rect:
+  //   xy = framebuffer origin of the offscreen RT in screen coords (rect origin - pad)
+  //   zw = offscreen RT size in pixels
   if (m_maskViewportLoc >= 0)
-    glUniform4f(m_maskViewportLoc, vpX, vpY, vpW, vpH);
+    glUniform4f(m_maskViewportLoc, rectFbBL.x1 - aaPad, rectFbBL.y1 - aaPad,
+                static_cast<float>(target.w), static_cast<float>(target.h));
   if (m_maskRectLoc >= 0)
     glUniform4f(m_maskRectLoc, rectFbBL.x1 + 0.5f, rectFbBL.y1 + 0.5f, rectFbBL.x2 - 0.5f,
                 rectFbBL.y2 - 0.5f);
@@ -1142,6 +1292,13 @@ void CRenderSystemGL::EndOffscreenRoundedGroup()
     CGLVertexAttribGuard attribGuard(m_roundMaskPosLoc);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   }
+  } // GLCompositeStateGuard dtor runs here (restores RT-local scissor etc.)
+
+  // Return this RT to the pool now that we've composited it.
+  ReleaseGroupTarget(idx);
+
+  // Now *force* scissor back to the pre-offscreen framebuffer scissor.
+  restorePreOffscreenScissor();
 }
 
 void CRenderSystemGL::EnableShader(ShaderMethodGL method)
