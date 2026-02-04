@@ -32,12 +32,31 @@
 #include "utils/EGLUtils.h"
 #endif
 
+#include <algorithm>
+#include <limits>
+
 using namespace std::chrono_literals;
 
 namespace
 {
 // AA ramp width in framebuffer pixels for rounded-rect mask
 constexpr float kRoundRectAAWidth = 1.25f;
+constexpr size_t kMaxRoundedGroupTargets = 8;
+
+template<typename T>
+static void DeleteOffscreenTarget(T& t)
+{
+  if (t.fbo != 0)
+  {
+    glDeleteFramebuffers(1, &t.fbo);
+    t.fbo = 0;
+  }
+  if (t.tex != 0)
+  {
+    glDeleteTextures(1, &t.tex);
+    t.tex = 0;
+  }
+}
 
 struct GLCompositeStateGuard : public ROUNDRECT::GLCompositeStateGuardBase
 {
@@ -452,7 +471,38 @@ void CRenderSystemGLES::SetScissors(const CRect &rect)
   GLint y1 = MathUtils::round_int(static_cast<double>(rect.y1));
   GLint x2 = MathUtils::round_int(static_cast<double>(rect.x2));
   GLint y2 = MathUtils::round_int(static_cast<double>(rect.y2));
-  glScissor(x1, m_height - y2, x2-x1, y2-y1);
+
+  GLint sx = x1;
+  GLint sy = m_height - y2;
+  GLint sw = x2 - x1;
+  GLint sh = y2 - y1;
+
+  // Remap into offscreen RT local space when rounded-group rendering uses a shifted viewport.
+  if (!m_groupStack.empty())
+  {
+    const auto& g = m_groupStack.back();
+    if (g.targetIndex >= 0 && g.targetIndex < static_cast<int>(m_groupPool.size()))
+    {
+      const auto& t = m_groupPool[static_cast<size_t>(g.targetIndex)];
+
+      sx -= g.offscreenOriginX;
+      sy -= g.offscreenOriginY;
+
+      // Clamp to RT bounds.
+      const GLint x1c = std::max<GLint>(0, sx);
+      const GLint y1c = std::max<GLint>(0, sy);
+      const GLint x2c = std::min<GLint>(t.w, sx + sw);
+      const GLint y2c = std::min<GLint>(t.h, sy + sh);
+      sx = x1c;
+      sy = y1c;
+      sw = std::max<GLint>(0, x2c - x1c);
+      sh = std::max<GLint>(0, y2c - y1c);
+    }
+  }
+
+  sw = std::max<GLint>(0, sw);
+  sh = std::max<GLint>(0, sh);
+  glScissor(sx, sy, sw, sh);
 }
 
 void CRenderSystemGLES::ResetScissors()
@@ -771,56 +821,114 @@ void CRenderSystemGLES::ReleaseShaders()
   }
   m_groupW = 0;
   m_groupH = 0;
+
+  for (auto& t : m_groupPool)
+    DeleteOffscreenTarget(t);
+  m_groupPool.clear();
   m_groupStack.clear();
 }
 
-bool CRenderSystemGLES::EnsureGroupFbo(int w, int h)
+int CRenderSystemGLES::AcquireGroupTarget(int w, int h)
 {
   if (w <= 0 || h <= 0)
-    return false;
+    return -1;
 
-  if (m_groupFbo != 0 && m_groupTex != 0 && m_groupW == w && m_groupH == h)
-    return true;
-
-  if (m_groupFbo != 0)
+  // Fast path: exact match.
+  for (size_t i = 0; i < m_groupPool.size(); ++i)
   {
-    glDeleteFramebuffers(1, &m_groupFbo);
-    m_groupFbo = 0;
-  }
-  if (m_groupTex != 0)
-  {
-    glDeleteTextures(1, &m_groupTex);
-    m_groupTex = 0;
+    auto& t = m_groupPool[i];
+    if (!t.inUse && t.fbo != 0 && t.tex != 0 && t.w == w && t.h == h)
+    {
+      t.inUse = true;
+      return static_cast<int>(i);
+    }
   }
 
-  glGenTextures(1, &m_groupTex);
-  glBindTexture(GL_TEXTURE_2D, m_groupTex);
+  // Best-fit reuse: smallest unused target that can fit.
+  size_t best = 0;
+  bool hasBest = false;
+  int bestArea = std::numeric_limits<int>::max();
+  for (size_t i = 0; i < m_groupPool.size(); ++i)
+  {
+    auto& t = m_groupPool[i];
+    if (t.inUse || t.fbo == 0 || t.tex == 0)
+      continue;
+    if (t.w < w || t.h < h)
+      continue;
+    const int area = t.w * t.h;
+    if (!hasBest || area < bestArea)
+    {
+      best = i;
+      bestArea = area;
+      hasBest = true;
+    }
+  }
+  if (hasBest)
+  {
+    auto& t = m_groupPool[best];
+    t.inUse = true;
+    return static_cast<int>(best);
+  }
+
+  OffscreenTarget t;
+  t.w = w;
+  t.h = h;
+  t.inUse = true;
+
+  glGenTextures(1, &t.tex);
+  glBindTexture(GL_TEXTURE_2D, t.tex);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-  glGenFramebuffers(1, &m_groupFbo);
-  glBindFramebuffer(GL_FRAMEBUFFER, m_groupFbo);
-  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_groupTex, 0);
+  glGenFramebuffers(1, &t.fbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, t.fbo);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t.tex, 0);
 
   const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   if (status != GL_FRAMEBUFFER_COMPLETE)
   {
-    CLog::Log(LOGERROR, "GLES: EnsureGroupFbo failed: {}x{} status=0x{:04x}", w, h,
+    CLog::Log(LOGERROR, "GLES: AcquireGroupTarget failed: {}x{} status=0x{:04x}", w, h,
               static_cast<unsigned int>(status));
-    glDeleteFramebuffers(1, &m_groupFbo);
-    glDeleteTextures(1, &m_groupTex);
-    m_groupFbo = 0;
-    m_groupTex = 0;
-    return false;
+    glDeleteFramebuffers(1, &t.fbo);
+    glDeleteTextures(1, &t.tex);
+    return -1;
   }
 
-  m_groupW = w;
-  m_groupH = h;
-  return true;
+  m_groupPool.emplace_back(t);
+  const int index = static_cast<int>(m_groupPool.size() - 1);
+  CLog::Log(LOGDEBUG, "GLES: rounded-clip RT alloc idx={} {}x{}", index, w, h);
+
+  // Keep the pool bounded: prune unused targets if we exceed the cap.
+  // (Avoid unbounded growth when many sizes are encountered over time.)
+  while (m_groupPool.size() > kMaxRoundedGroupTargets)
+  {
+    bool pruned = false;
+    for (auto it = m_groupPool.begin(); it != m_groupPool.end(); ++it)
+    {
+      if (!it->inUse)
+      {
+        DeleteOffscreenTarget(*it);
+        m_groupPool.erase(it);
+        pruned = true;
+        break;
+      }
+    }
+    if (!pruned)
+      break;
+  }
+
+  return index;
+ }
+ 
+void CRenderSystemGLES::ReleaseGroupTarget(int index)
+{
+  if (index < 0 || index >= static_cast<int>(m_groupPool.size()))
+    return;
+  m_groupPool[static_cast<size_t>(index)].inUse = false;
 }
 
 bool CRenderSystemGLES::BeginOffscreenRoundedGroup(const CRect& rectScreenTL, float radiusPx)

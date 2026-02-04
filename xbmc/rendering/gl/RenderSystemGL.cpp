@@ -25,6 +25,7 @@
 #include "windowing/WinSystem.h"
 
 #include <algorithm>
+#include <limits>
 #include <exception>
 
 #if defined(TARGET_LINUX)
@@ -1000,9 +1001,10 @@ int CRenderSystemGL::AcquireGroupTarget(int w, int h)
     }
   }
 
-  // Best-fit reuse: take the smallest unused target that can fit the request.
-  size_t best = static_cast<size_t>(-1);
-  int bestArea = 0;
+  // Best-fit reuse: smallest unused target that can fit.
+  size_t best = 0;
+  bool hasBest = false;
+  int bestArea = std::numeric_limits<int>::max();
   for (size_t i = 0; i < m_groupPool.size(); ++i)
   {
     auto& t = m_groupPool[i];
@@ -1011,13 +1013,14 @@ int CRenderSystemGL::AcquireGroupTarget(int w, int h)
     if (t.w < w || t.h < h)
       continue;
     const int area = t.w * t.h;
-    if (best == static_cast<size_t>(-1) || area < bestArea)
+    if (!hasBest || area < bestArea)
     {
       best = i;
       bestArea = area;
+      hasBest = true;
     }
   }
-  if (best != static_cast<size_t>(-1))
+  if (hasBest)
   {
     auto& t = m_groupPool[best];
     t.inUse = true;
@@ -1072,7 +1075,7 @@ int CRenderSystemGL::AcquireGroupTarget(int w, int h)
       }
     }
     if (!pruned)
-      break; // All in use (nested); don't prune.
+      break;
   }
 
   return index;
