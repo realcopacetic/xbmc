@@ -14,6 +14,7 @@
 #include "windowing/WinSystem.h"
 
 #include <cassert>
+#include <limits>
 #include <utility>
 
 using namespace KODI;
@@ -43,6 +44,7 @@ CGUIControlGroup::CGUIControlGroup(const CGUIControlGroup &from)
   m_defaultControl = from.m_defaultControl;
   m_defaultAlways = from.m_defaultAlways;
   m_renderFocusedLast = from.m_renderFocusedLast;
+  m_clipping = from.m_clipping;
 
   // run through and add our controls
   for (auto *i : from.m_children)
@@ -109,6 +111,16 @@ void CGUIControlGroup::Render()
 {
   CPoint pos(GetPosition());
   CServiceBroker::GetWinSystem()->GetGfxContext().SetOrigin(pos.x, pos.y);
+  CRect prevScissors;
+  if (m_clipping)
+  {
+    prevScissors = CServiceBroker::GetWinSystem()->GetGfxContext().GetScissors();
+    const CRect localRect(0.0f, 0.0f, m_width, m_height);
+    CRect aabb = CServiceBroker::GetWinSystem()->GetGfxContext().GenerateAABB(localRect);
+    if (!prevScissors.IsEmpty())
+      aabb.Intersect(prevScissors);
+    CServiceBroker::GetWinSystem()->GetGfxContext().SetScissors(aabb);
+  }
   CGUIControl *focusedControl = NULL;
   if (CServiceBroker::GetWinSystem()->GetGfxContext().GetRenderOrder() ==
       RENDER_ORDER_FRONT_TO_BACK)
@@ -134,6 +146,13 @@ void CGUIControlGroup::Render()
   if (focusedControl)
     focusedControl->DoRender();
   CGUIControl::Render();
+  if (m_clipping)
+  {
+    if (prevScissors.IsEmpty())
+      CServiceBroker::GetWinSystem()->GetGfxContext().ResetScissors();
+    else
+      CServiceBroker::GetWinSystem()->GetGfxContext().SetScissors(prevScissors);
+  }
   CServiceBroker::GetWinSystem()->GetGfxContext().RestoreOrigin();
 }
 
@@ -396,11 +415,21 @@ EVENT_RESULT CGUIControlGroup::SendMouseEvent(const CPoint& point, const MOUSE::
   if (CGUIControl::CanFocus())
   {
     CPoint pos(GetPosition());
+    CPoint localPoint = childPoint - pos;
+    // If the group is clipped, ignore mouse events outside its bounding box
+    if (m_clipping)
+    {
+      if (localPoint.x < 0.0f || localPoint.x > m_width ||
+          localPoint.y < 0.0f || localPoint.y > m_height)
+      {
+        return EVENT_RESULT_UNHANDLED;
+      }
+    }
     // run through our controls in reverse order (so that last rendered is checked first)
     for (rControls i = m_children.rbegin(); i != m_children.rend(); ++i)
     {
       CGUIControl *child = *i;
-      EVENT_RESULT ret = child->SendMouseEvent(childPoint - pos, event);
+      EVENT_RESULT ret = child->SendMouseEvent(localPoint, event);
       if (ret)
       { // we've handled the action, and/or have focused an item
         return ret;
@@ -420,9 +449,15 @@ void CGUIControlGroup::UnfocusFromPoint(const CPoint &point)
   CPoint controlCoords(point);
   m_transform.InverseTransformPosition(controlCoords.x, controlCoords.y);
   controlCoords -= GetPosition();
+  // Check if the pointer is physically outside the group's clipping boundaries
+  bool isOutsideClip = m_clipping && (controlCoords.x < 0.0f || controlCoords.x > m_width ||
+                                      controlCoords.y < 0.0f || controlCoords.y > m_height);
   for (auto *child : m_children)
   {
-    child->UnfocusFromPoint(controlCoords);
+    if (isOutsideClip)
+      child->UnfocusFromPoint(CPoint(std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest()));
+    else
+      child->UnfocusFromPoint(controlCoords);
   }
   CGUIControl::UnfocusFromPoint(point);
 }
