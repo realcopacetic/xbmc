@@ -68,6 +68,7 @@ public:
     m_defaultAlways = always;
   }
   void SetRenderFocusedLast(bool renderLast) { m_renderFocusedLast = renderLast; }
+  void SetClipping(bool clip) { m_clipping = clip; }
 
   void SaveStates(std::vector<CControlState> &states) override;
 
@@ -89,6 +90,7 @@ protected:
   bool m_defaultAlways;
   int m_focusedControl;
   bool m_renderFocusedLast;
+  bool m_clipping{false};
 private:
   typedef std::vector< std::vector<CGUIControl *> * > COLLECTORTYPE;
 
