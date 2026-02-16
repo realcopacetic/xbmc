@@ -24,6 +24,7 @@ enum class ShaderMethodGL
 {
   SM_DEFAULT = 0,
   SM_TEXTURE,
+  SM_TEXTURE_CLIP,
   SM_TEXTURE_LIM,
   SM_MULTI,
   SM_FONTS,
@@ -50,6 +51,7 @@ private:
   static constexpr auto ShaderMethodGLMap = make_map<ShaderMethodGL, std::string_view>({
       {ShaderMethodGL::SM_DEFAULT, "default"},
       {ShaderMethodGL::SM_TEXTURE, "texture"},
+      {ShaderMethodGL::SM_TEXTURE_CLIP, "texture clip"},
       {ShaderMethodGL::SM_TEXTURE_LIM, "texture limited"},
       {ShaderMethodGL::SM_MULTI, "multi"},
       {ShaderMethodGL::SM_FONTS, "fonts"},
@@ -122,6 +124,7 @@ public:
   GLint ShaderGetModel();
   GLint ShaderGetMatrix();
   GLint ShaderGetClip();
+  GLint ShaderGetClipRadius();
   GLint ShaderGetCoordStep();
 
 protected:

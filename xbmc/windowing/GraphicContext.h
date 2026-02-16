@@ -197,9 +197,11 @@ public:
    \sa RestoreClipRegion
    */
   bool SetClipRegion(float x, float y, float w, float h);
+  bool SetClipRegion(float x, float y, float w, float h, float radius);
   void RestoreClipRegion();
   void ClipRect(CRect &vertex, CRect &texture, CRect *diffuse = NULL);
   CRect GetClipRegion();
+  float GetClipRadius() const;
   void AddGUITransform();
   TransformMatrix AddTransform(const TransformMatrix &matrix);
   void SetTransform(const TransformMatrix &matrix);
@@ -240,6 +242,7 @@ protected:
   std::stack<CPoint> m_cameras;
   std::stack<CPoint> m_origins;
   std::stack<CRect> m_clipRegions;
+  std::stack<float> m_clipRadii;
   std::stack<float> m_stereoFactors;
   std::stack<CRect> m_viewStack;
   CRect m_scissors;

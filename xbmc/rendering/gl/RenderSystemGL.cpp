@@ -734,6 +734,16 @@ void CRenderSystemGL::InitialiseShaders()
     CLog::Log(LOGERROR, "GUI Shader gl_shader_frag_texture.glsl - compile and link failed");
   }
 
+  m_pShader[ShaderMethodGL::SM_TEXTURE_CLIP] = std::make_unique<CGLShader>(
+      "gl_shader_vert_clip.glsl", "gl_shader_frag_texture.glsl", defines);
+  if (!m_pShader[ShaderMethodGL::SM_TEXTURE_CLIP]->CompileAndLink())
+  {
+    m_pShader[ShaderMethodGL::SM_TEXTURE_CLIP]->Free();
+    m_pShader[ShaderMethodGL::SM_TEXTURE_CLIP].reset();
+    CLog::Log(LOGERROR,
+              "GUI Shader gl_shader_vert_clip.glsl + gl_shader_frag_texture.glsl - compile and link failed");
+  }
+
   m_pShader[ShaderMethodGL::SM_TEXTURE_LIM] =
       std::make_unique<CGLShader>("gl_shader_frag_texture_lim.glsl", defines);
   if (!m_pShader[ShaderMethodGL::SM_TEXTURE_LIM]->CompileAndLink())
@@ -916,6 +926,14 @@ GLint CRenderSystemGL::ShaderGetClip()
 {
   if (m_pShader[m_method])
     return m_pShader[m_method]->GetShaderClipLoc();
+
+  return -1;
+}
+
+GLint CRenderSystemGL::ShaderGetClipRadius()
+{
+  if (m_pShader[m_method])
+    return m_pShader[m_method]->GetShaderClipRadiusLoc();
 
   return -1;
 }

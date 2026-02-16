@@ -14,6 +14,7 @@
 #include "utils/GLUtils.h"
 #include "utils/Geometry.h"
 #include "utils/log.h"
+#include "windowing/GraphicContext.h"
 #include "windowing/WinSystem.h"
 
 #include <cstddef>
@@ -60,6 +61,9 @@ void CGUITextureGL::Begin(KODI::UTILS::COLOR::Color color)
 
   bool hasAlpha = m_texture.m_textures[m_currentFrame]->HasAlpha() || m_col[3] < 255;
 
+  auto& gfxContext = CServiceBroker::GetWinSystem()->GetGfxContext();
+  const bool hasRounding = gfxContext.GetClipRadius() > 0.0f;
+
   if (m_diffuse.size())
   {
     if (m_col[0] == 255 && m_col[1] == 255 && m_col[2] == 255 && m_col[3] == 255 )
@@ -77,14 +81,12 @@ void CGUITextureGL::Begin(KODI::UTILS::COLOR::Color color)
   }
   else
   {
-    if (m_col[0] == 255 && m_col[1] == 255 && m_col[2] == 255 && m_col[3] == 255)
-    {
+    if (hasRounding)
+      m_renderSystem->EnableShader(ShaderMethodGL::SM_TEXTURE_CLIP);
+    else if (m_col[0] == 255 && m_col[1] == 255 && m_col[2] == 255 && m_col[3] == 255)
       m_renderSystem->EnableShader(ShaderMethodGL::SM_TEXTURE_NOBLEND);
-    }
     else
-    {
       m_renderSystem->EnableShader(ShaderMethodGL::SM_TEXTURE);
-    }
   }
 
   if (hasAlpha)
@@ -143,6 +145,24 @@ void CGUITextureGL::End()
     glGenBuffers(1, &IndexVBO);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, IndexVBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(ushort)*m_idx.size(), m_idx.data(), GL_STATIC_DRAW);
+
+    // Feed clip uniforms when using the clip vertex shader (textures do not set these anywhere else).
+    GLint clipLoc = m_renderSystem->ShaderGetClip();
+    if (clipLoc >= 0)
+    {
+      auto& gfxContext = CServiceBroker::GetWinSystem()->GetGfxContext();
+      const float radius = gfxContext.GetClipRadius();
+      if (radius > 0.0f)
+      {
+      const CRect clipRect = gfxContext.GetClipRegion();
+      const float clipBoundaries[4] = {clipRect.x1, clipRect.y1, clipRect.x2, clipRect.y2};
+      glUniform4fv(clipLoc, 1, clipBoundaries);
+
+      GLint radiusLoc = m_renderSystem->ShaderGetClipRadius();
+      if (radiusLoc >= 0)
+        glUniform1f(radiusLoc, radius);
+      }
+    }
 
     glDrawElements(GL_TRIANGLES, m_packedVertices.size()*6 / 4, GL_UNSIGNED_SHORT, 0);
 

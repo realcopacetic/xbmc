@@ -45,6 +45,7 @@ CGUIControlGroup::CGUIControlGroup(const CGUIControlGroup &from)
   m_renderFocusedLast = from.m_renderFocusedLast;
   m_clipping = from.m_clipping;
   m_transformChildren = from.m_transformChildren;
+  m_cornerRadius = from.m_cornerRadius;
 
   // run through and add our controls
   for (auto *i : from.m_children)
@@ -117,6 +118,7 @@ void CGUIControlGroup::Render()
   CPoint pos(GetPosition());
   CServiceBroker::GetWinSystem()->GetGfxContext().SetOrigin(pos.x, pos.y);
   CRect prevScissors;
+  bool restoreClip = false;
   if (m_clipping)
   {
     prevScissors = CServiceBroker::GetWinSystem()->GetGfxContext().GetScissors();
@@ -125,6 +127,9 @@ void CGUIControlGroup::Render()
     if (!prevScissors.IsEmpty())
       aabb.Intersect(prevScissors);
     CServiceBroker::GetWinSystem()->GetGfxContext().SetScissors(aabb);
+    if (m_cornerRadius > 0.0f && !aabb.IsEmpty())
+      restoreClip = CServiceBroker::GetWinSystem()->GetGfxContext().SetClipRegion(
+          aabb.x1, aabb.y1, aabb.Width(), aabb.Height(), m_cornerRadius);
   }
   CGUIControl *focusedControl = NULL;
   if (CServiceBroker::GetWinSystem()->GetGfxContext().GetRenderOrder() ==
@@ -153,6 +158,8 @@ void CGUIControlGroup::Render()
   CGUIControl::Render();
   if (m_clipping)
   {
+    if (restoreClip)
+      CServiceBroker::GetWinSystem()->GetGfxContext().RestoreClipRegion();
     if (prevScissors.IsEmpty())
       CServiceBroker::GetWinSystem()->GetGfxContext().ResetScissors();
     else

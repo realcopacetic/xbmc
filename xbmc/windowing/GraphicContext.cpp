@@ -53,6 +53,11 @@ void CGraphicContext::RestoreOrigin()
 
 // add a new clip region, intersecting with the previous clip region.
 bool CGraphicContext::SetClipRegion(float x, float y, float w, float h)
+{
+  return SetClipRegion(x, y, w, h, 0.0f);
+}
+
+bool CGraphicContext::SetClipRegion(float x, float y, float w, float h, float radius)
 { // transform from our origin
   CPoint origin;
   if (!m_origins.empty())
@@ -71,6 +76,8 @@ bool CGraphicContext::SetClipRegion(float x, float y, float w, float h)
     return false;
 
   m_clipRegions.push(rect);
+  const float maxRadius = 0.5f * std::min(rect.Width(), rect.Height());
+  m_clipRadii.push(std::max(0.0f, std::min(radius, maxRadius)));
 
   // here we could set the hardware clipping, if applicable
   return true;
@@ -80,8 +87,17 @@ void CGraphicContext::RestoreClipRegion()
 {
   if (!m_clipRegions.empty())
     m_clipRegions.pop();
+  if (!m_clipRadii.empty())
+    m_clipRadii.pop();
 
   // here we could reset the hardware clipping, if applicable
+}
+
+float CGraphicContext::GetClipRadius() const
+{
+  if (m_clipRadii.empty())
+    return 0.0f;
+  return m_clipRadii.top();
 }
 
 void CGraphicContext::ClipRect(CRect &vertex, CRect &texture, CRect *texture2)

@@ -30,6 +30,7 @@ public:
   GLint GetModelLoc() {return m_hModel; }
   GLint GetMatrixLoc() { return m_hMatrix; }
   GLint GetShaderClipLoc() { return m_hShaderClip; }
+  GLint GetShaderClipRadiusLoc() const { return m_hShaderClipRadius; }
   GLint GetShaderCoordStepLoc() { return m_hCoordStep; }
   bool HardwareClipIsPossible() {return m_clipPossible; }
   GLfloat GetClipXFactor() {return m_clipXFactor; }
@@ -45,6 +46,7 @@ protected:
   GLint m_hModel = 0;
   GLint m_hMatrix{0}; // m_hProj * m_hModel
   GLint m_hShaderClip{0}; // clipping rect vec4(x1,y1,x2,y2)
+  GLint m_hShaderClipRadius{-1};
   GLint m_hCoordStep{0}; // step (1/resolution) for the two textures vec4(t1.x,t1.y,t2.x,t2.y)
   GLint m_hPos = 0;
   GLint m_hCol = 0;

@@ -15,6 +15,7 @@ in vec2 m_attrcord1;
 out vec2 m_cord0;
 out vec2 m_cord1;
 out vec4 m_colour;
+out vec2 m_clipPos;
 uniform mat4 m_matrix;
 uniform vec4 m_shaderClip;
 uniform vec4 m_cordStep;
@@ -28,7 +29,8 @@ void main()
 {
   // limit the vertices to the clipping area
   vec4 position = vec4(0., 0., 0., 1.);
-  position.xy = clamp(m_attrpos, m_shaderClip.xy, m_shaderClip.zw);
+  position.xy = m_attrpos;
+  m_clipPos = position.xy;
   gl_Position = m_matrix * position;
 
   // set rendering depth

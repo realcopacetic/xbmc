@@ -50,6 +50,7 @@ void CGLShader::OnCompiledAndLinked()
   m_hModel = glGetUniformLocation(ProgramHandle(), "m_model");
   m_hMatrix = glGetUniformLocation(ProgramHandle(), "m_matrix");
   m_hShaderClip = glGetUniformLocation(ProgramHandle(), "m_shaderClip");
+  m_hShaderClipRadius = glGetUniformLocation(ProgramHandle(), "m_shaderClipRadius");
   m_hCoordStep = glGetUniformLocation(ProgramHandle(), "m_cordStep");
   m_hDepth = glGetUniformLocation(ProgramHandle(), "m_depth");
 
