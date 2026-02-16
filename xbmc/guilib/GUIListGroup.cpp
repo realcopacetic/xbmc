@@ -64,20 +64,21 @@ void CGUIListGroup::AddControl(CGUIControl *control, int position /*= -1*/)
 
 void CGUIListGroup::Process(unsigned int currentTime, CDirtyRegionList &dirtyregions)
 {
-  CServiceBroker::GetWinSystem()->GetGfxContext().SetOrigin(m_posX, m_posY);
-
   CRect rect;
-  for (iControls it = m_children.begin(); it != m_children.end(); ++it)
-  {
-    CGUIControl *control = *it;
-    control->UpdateVisibility(m_item);
-    unsigned int oldDirty = dirtyregions.size();
-    control->DoProcess(currentTime, dirtyregions);
-    if (control->IsVisible() || (oldDirty != dirtyregions.size())) // visible or dirty (was visible?)
-      rect.Union(control->GetRenderRegion());
-  }
-
-  CServiceBroker::GetWinSystem()->GetGfxContext().RestoreOrigin();
+  { // BEGIN SAFE SCOPE
+    CTransformDetachGuard detachGuard(m_transformChildren, m_transform);
+    CServiceBroker::GetWinSystem()->GetGfxContext().SetOrigin(m_posX, m_posY);
+    for (iControls it = m_children.begin(); it != m_children.end(); ++it)
+    {
+      CGUIControl *control = *it;
+      control->UpdateVisibility(m_item);
+      unsigned int oldDirty = dirtyregions.size();
+      control->DoProcess(currentTime, dirtyregions);
+      if (control->IsVisible() || (oldDirty != dirtyregions.size())) // visible or dirty (was visible?)
+        rect.Union(control->GetRenderRegion());
+    }
+    CServiceBroker::GetWinSystem()->GetGfxContext().RestoreOrigin();
+  } // END SAFE SCOPE
   CGUIControl::Process(currentTime, dirtyregions);
   m_renderRegion = rect;
   m_item = NULL;

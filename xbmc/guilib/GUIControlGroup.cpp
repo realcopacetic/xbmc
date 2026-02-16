@@ -18,6 +18,19 @@
 
 using namespace KODI;
 
+CTransformDetachGuard::CTransformDetachGuard(bool transformChildren, const TransformMatrix& transform)
+  : m_transform(transform), m_detached(!transformChildren && !transform.identity)
+{
+  if (m_detached)
+    CServiceBroker::GetWinSystem()->GetGfxContext().RemoveTransform();
+}
+
+CTransformDetachGuard::~CTransformDetachGuard()
+{
+  if (m_detached)
+    CServiceBroker::GetWinSystem()->GetGfxContext().AddTransform(m_transform);
+}
+
 CGUIControlGroup::CGUIControlGroup()
 {
   m_defaultControl = 0;
@@ -25,6 +38,7 @@ CGUIControlGroup::CGUIControlGroup()
   m_focusedControl = 0;
   m_renderFocusedLast = false;
   m_clipping = false;
+  m_transformChildren = true;
   ControlType = GUICONTROL_GROUP;
 }
 
@@ -36,6 +50,7 @@ CGUIControlGroup::CGUIControlGroup(int parentID, int controlID, float posX, floa
   m_focusedControl = 0;
   m_renderFocusedLast = false;
   m_clipping = false;
+  m_transformChildren = true;
   ControlType = GUICONTROL_GROUP;
 }
 
@@ -46,6 +61,7 @@ CGUIControlGroup::CGUIControlGroup(const CGUIControlGroup &from)
   m_defaultAlways = from.m_defaultAlways;
   m_renderFocusedLast = from.m_renderFocusedLast;
   m_clipping = from.m_clipping;
+  m_transformChildren = from.m_transformChildren;
 
   // run through and add our controls
   for (auto *i : from.m_children)
@@ -90,20 +106,22 @@ void CGUIControlGroup::DynamicResourceAlloc(bool bOnOff)
 
 void CGUIControlGroup::Process(unsigned int currentTime, CDirtyRegionList &dirtyregions)
 {
-  CPoint pos(GetPosition());
-  CServiceBroker::GetWinSystem()->GetGfxContext().SetOrigin(pos.x, pos.y);
-
   CRect rect;
-  for (auto *control : m_children)
-  {
-    control->UpdateVisibility(nullptr);
-    unsigned int oldDirty = dirtyregions.size();
-    control->DoProcess(currentTime, dirtyregions);
-    if (control->IsVisible() || (oldDirty != dirtyregions.size())) // visible or dirty (was visible?)
-      rect.Union(control->GetRenderRegion());
-  }
+{ // BEGIN SAFE SCOPE
+    CTransformDetachGuard detachGuard(m_transformChildren, m_transform);
+    CPoint pos(GetPosition());
+    CServiceBroker::GetWinSystem()->GetGfxContext().SetOrigin(pos.x, pos.y);
 
-  CServiceBroker::GetWinSystem()->GetGfxContext().RestoreOrigin();
+    for (auto *control : m_children)
+    {
+      control->UpdateVisibility(nullptr);
+      unsigned int oldDirty = dirtyregions.size();
+      control->DoProcess(currentTime, dirtyregions);
+      if (control->IsVisible() || (oldDirty != dirtyregions.size())) // visible or dirty (was visible?)
+        rect.Union(control->GetRenderRegion());
+    }
+    CServiceBroker::GetWinSystem()->GetGfxContext().RestoreOrigin();
+  } // END SAFE SCOPE
   CGUIControl::Process(currentTime, dirtyregions);
   m_renderRegion = rect;
 }
@@ -122,30 +140,34 @@ void CGUIControlGroup::Render()
       aabb.Intersect(prevScissors);
     CServiceBroker::GetWinSystem()->GetGfxContext().SetScissors(aabb);
   }
-  CGUIControl *focusedControl = NULL;
-  if (CServiceBroker::GetWinSystem()->GetGfxContext().GetRenderOrder() ==
-      RENDER_ORDER_FRONT_TO_BACK)
-  {
-    for (auto it = m_children.rbegin(); it != m_children.rend(); ++it)
+{ // BEGIN SAFE SCOPE
+    CTransformDetachGuard detachGuard(m_transformChildren, m_transform);
+    CGUIControl *focusedControl = NULL;
+    
+    if (CServiceBroker::GetWinSystem()->GetGfxContext().GetRenderOrder() == RENDER_ORDER_FRONT_TO_BACK)
     {
-      if (m_renderFocusedLast && (*it)->HasFocus())
-        focusedControl = (*it);
-      else
-        (*it)->DoRender();
+      for (auto it = m_children.rbegin(); it != m_children.rend(); ++it)
+      {
+        if (m_renderFocusedLast && (*it)->HasFocus())
+          focusedControl = (*it);
+        else
+          (*it)->DoRender();
+      }
     }
-  }
-  else
-  {
-    for (auto* control : m_children)
+    else
     {
-      if (m_renderFocusedLast && control->HasFocus())
-        focusedControl = control;
-      else
-        control->DoRender();
+      for (auto* control : m_children)
+      {
+        if (m_renderFocusedLast && control->HasFocus())
+          focusedControl = control;
+        else
+          control->DoRender();
+      }
     }
-  }
-  if (focusedControl)
-    focusedControl->DoRender();
+    
+    if (focusedControl)
+      focusedControl->DoRender();
+  } // END SAFE SCOPE
   CGUIControl::Render();
   if (m_clipping)
   {
@@ -411,7 +433,8 @@ EVENT_RESULT CGUIControlGroup::SendMouseEvent(const CPoint& point, const MOUSE::
 {
   // transform our position into child coordinates
   CPoint childPoint(point);
-  m_transform.InverseTransformPosition(childPoint.x, childPoint.y);
+  if (m_transformChildren)
+    m_transform.InverseTransformPosition(childPoint.x, childPoint.y);
 
   if (CGUIControl::CanFocus())
   {
@@ -448,7 +471,8 @@ EVENT_RESULT CGUIControlGroup::SendMouseEvent(const CPoint& point, const MOUSE::
 void CGUIControlGroup::UnfocusFromPoint(const CPoint &point)
 {
   CPoint controlCoords(point);
-  m_transform.InverseTransformPosition(controlCoords.x, controlCoords.y);
+  if (m_transformChildren)
+    m_transform.InverseTransformPosition(controlCoords.x, controlCoords.y);
   controlCoords -= GetPosition();
   // Check if the pointer is physically outside the group's clipping boundaries
   bool isOutsideClip = m_clipping && (controlCoords.x < 0.0f || controlCoords.x > m_width ||
