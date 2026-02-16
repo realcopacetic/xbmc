@@ -45,6 +45,7 @@ CGUIControlGroup::CGUIControlGroup(const CGUIControlGroup &from)
   m_defaultAlways = from.m_defaultAlways;
   m_renderFocusedLast = from.m_renderFocusedLast;
   m_clipping = from.m_clipping;
+  m_transformChildren = from.m_transformChildren;
 
   // run through and add our controls
   for (auto *i : from.m_children)
@@ -89,6 +90,9 @@ void CGUIControlGroup::DynamicResourceAlloc(bool bOnOff)
 
 void CGUIControlGroup::Process(unsigned int currentTime, CDirtyRegionList &dirtyregions)
 {
+  const bool detach = !m_transformChildren && !m_transform.identity;
+  if (detach)
+    CServiceBroker::GetWinSystem()->GetGfxContext().RemoveTransform();
   CPoint pos(GetPosition());
   CServiceBroker::GetWinSystem()->GetGfxContext().SetOrigin(pos.x, pos.y);
 
@@ -103,6 +107,8 @@ void CGUIControlGroup::Process(unsigned int currentTime, CDirtyRegionList &dirty
   }
 
   CServiceBroker::GetWinSystem()->GetGfxContext().RestoreOrigin();
+  if (detach)
+    CServiceBroker::GetWinSystem()->GetGfxContext().AddTransform(m_transform);
   CGUIControl::Process(currentTime, dirtyregions);
   m_renderRegion = rect;
 }
@@ -121,6 +127,9 @@ void CGUIControlGroup::Render()
       aabb.Intersect(prevScissors);
     CServiceBroker::GetWinSystem()->GetGfxContext().SetScissors(aabb);
   }
+  const bool detach = !m_transformChildren && !m_transform.identity;
+  if (detach)
+    CServiceBroker::GetWinSystem()->GetGfxContext().RemoveTransform();
   CGUIControl *focusedControl = NULL;
   if (CServiceBroker::GetWinSystem()->GetGfxContext().GetRenderOrder() ==
       RENDER_ORDER_FRONT_TO_BACK)
@@ -145,6 +154,8 @@ void CGUIControlGroup::Render()
   }
   if (focusedControl)
     focusedControl->DoRender();
+  if (detach)
+    CServiceBroker::GetWinSystem()->GetGfxContext().AddTransform(m_transform);
   CGUIControl::Render();
   if (m_clipping)
   {
@@ -410,7 +421,8 @@ EVENT_RESULT CGUIControlGroup::SendMouseEvent(const CPoint& point, const MOUSE::
 {
   // transform our position into child coordinates
   CPoint childPoint(point);
-  m_transform.InverseTransformPosition(childPoint.x, childPoint.y);
+  if (m_transformChildren)
+    m_transform.InverseTransformPosition(childPoint.x, childPoint.y);
 
   if (CGUIControl::CanFocus())
   {
@@ -447,7 +459,8 @@ EVENT_RESULT CGUIControlGroup::SendMouseEvent(const CPoint& point, const MOUSE::
 void CGUIControlGroup::UnfocusFromPoint(const CPoint &point)
 {
   CPoint controlCoords(point);
-  m_transform.InverseTransformPosition(controlCoords.x, controlCoords.y);
+  if (m_transformChildren)
+    m_transform.InverseTransformPosition(controlCoords.x, controlCoords.y);
   controlCoords -= GetPosition();
   // Check if the pointer is physically outside the group's clipping boundaries
   bool isOutsideClip = m_clipping && (controlCoords.x < 0.0f || controlCoords.x > m_width ||

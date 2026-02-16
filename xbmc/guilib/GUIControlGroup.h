@@ -69,6 +69,7 @@ public:
   }
   void SetRenderFocusedLast(bool renderLast) { m_renderFocusedLast = renderLast; }
   void SetClipping(bool clip) { m_clipping = clip; }
+  void SetTransformChildren(bool transform) { m_transformChildren = transform; }
 
   void SaveStates(std::vector<CControlState> &states) override;
 
@@ -91,6 +92,7 @@ protected:
   int m_focusedControl;
   bool m_renderFocusedLast;
   bool m_clipping{false};
+  bool m_transformChildren{true};
 private:
   typedef std::vector< std::vector<CGUIControl *> * > COLLECTORTYPE;
 
