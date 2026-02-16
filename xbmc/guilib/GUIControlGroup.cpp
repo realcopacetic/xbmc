@@ -44,6 +44,7 @@ CGUIControlGroup::CGUIControlGroup(const CGUIControlGroup &from)
   m_defaultAlways = from.m_defaultAlways;
   m_renderFocusedLast = from.m_renderFocusedLast;
   m_clipping = from.m_clipping;
+  m_transformChildren = from.m_transformChildren;
 
   // run through and add our controls
   for (auto *i : from.m_children)
@@ -88,6 +89,9 @@ void CGUIControlGroup::DynamicResourceAlloc(bool bOnOff)
 
 void CGUIControlGroup::Process(unsigned int currentTime, CDirtyRegionList &dirtyregions)
 {
+  const bool detach = !m_transformChildren && !m_transform.identity;
+  if (detach)
+    CServiceBroker::GetWinSystem()->GetGfxContext().RemoveTransform();
   CPoint pos(GetPosition());
   CServiceBroker::GetWinSystem()->GetGfxContext().SetOrigin(pos.x, pos.y);
 
@@ -102,6 +106,8 @@ void CGUIControlGroup::Process(unsigned int currentTime, CDirtyRegionList &dirty
   }
 
   CServiceBroker::GetWinSystem()->GetGfxContext().RestoreOrigin();
+  if (detach)
+    CServiceBroker::GetWinSystem()->GetGfxContext().AddTransform(m_transform);
   CGUIControl::Process(currentTime, dirtyregions);
   m_renderRegion = rect;
 }

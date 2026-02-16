@@ -64,6 +64,9 @@ void CGUIListGroup::AddControl(CGUIControl *control, int position /*= -1*/)
 
 void CGUIListGroup::Process(unsigned int currentTime, CDirtyRegionList &dirtyregions)
 {
+  const bool detach = !m_transformChildren && !m_transform.identity;
+  if (detach)
+    CServiceBroker::GetWinSystem()->GetGfxContext().RemoveTransform();
   CServiceBroker::GetWinSystem()->GetGfxContext().SetOrigin(m_posX, m_posY);
 
   CRect rect;
@@ -78,6 +81,8 @@ void CGUIListGroup::Process(unsigned int currentTime, CDirtyRegionList &dirtyreg
   }
 
   CServiceBroker::GetWinSystem()->GetGfxContext().RestoreOrigin();
+  if (detach)
+    CServiceBroker::GetWinSystem()->GetGfxContext().AddTransform(m_transform);
   CGUIControl::Process(currentTime, dirtyregions);
   m_renderRegion = rect;
   m_item = NULL;
