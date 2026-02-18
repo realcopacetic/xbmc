@@ -911,6 +911,7 @@ CGUIControl* CGUIControlFactory::Create(int parentID,
   int rulerUnit = 12;
   bool useControlCoords = false;
   bool renderFocusedLast = false;
+  float cornerRadius = 0.0f;
 
   CRect hitRect;
   CPoint camera;
@@ -1173,6 +1174,7 @@ CGUIControl* CGUIControlFactory::Create(int parentID,
 
   XMLUtils::GetBoolean(pControlNode, "usecontrolcoords", useControlCoords);
   XMLUtils::GetBoolean(pControlNode, "renderfocusedlast", renderFocusedLast);
+  XMLUtils::GetFloat(pControlNode, "cornerradius", cornerRadius);
   XMLUtils::GetBoolean(pControlNode, "resetonlabelchange", resetOnLabelChange);
 
   XMLUtils::GetBoolean(pControlNode, "password", bPassword);
@@ -1265,6 +1267,8 @@ CGUIControl* CGUIControlFactory::Create(int parentID,
         static_cast<CGUIControlGroup*>(control)->SetDefaultControl(defaultControl, defaultAlways);
         static_cast<CGUIControlGroup*>(control)->SetRenderFocusedLast(renderFocusedLast);
       }
+      static_cast<CGUIControlGroup*>(control)->SetCornerRadius(cornerRadius);
+
       break;
     }
     case CGUIControl::GUICONTROL_GROUPLIST:
@@ -1762,6 +1766,7 @@ CGUIControl* CGUIControlFactory::Create(int parentID,
   // things that apply to all controls
   if (control)
   {
+    control->SetCornerRadius(cornerRadius);
     control->SetHitRect(hitRect, hitColor);
     control->SetVisibleCondition(visibleCondition, allowHiddenFocus);
     control->SetEnableCondition(enableCondition);

@@ -65,6 +65,11 @@ public:
   virtual void SetScissors(const CRect& rect) = 0;
   virtual void ResetScissors() = 0;
 
+  virtual void PushRoundedClip(float radius, float width, float height) {}
+  virtual void PopRoundedClip() {}
+  virtual bool IsRoundedClipActive() { return false; }
+  virtual float GetCurrentClipRadius() { return 0.0f; }
+
   virtual void SetDepthCulling(DepthCulling culling) {}
 
   virtual void CaptureStateBlock() = 0;

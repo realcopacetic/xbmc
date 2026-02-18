@@ -85,6 +85,8 @@ void CGUIProgressControl::Process(unsigned int currentTime, CDirtyRegionList &di
 
 void CGUIProgressControl::Render()
 {
+  BeginRoundedRegion();
+
   if (!IsDisabled())
   {
     const bool renderFrontToBack =
@@ -128,6 +130,8 @@ void CGUIProgressControl::Render()
 
     m_guiOverlay->Render();
   }
+
+  EndRoundedRegion();
 
   CGUIControl::Render();
 }

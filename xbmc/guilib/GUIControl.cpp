@@ -21,6 +21,7 @@
 #include "input/actions/ActionIDs.h"
 #include "input/mouse/MouseEvent.h"
 #include "input/mouse/MouseStat.h"
+#include "rendering/RenderSystem.h"
 #include "utils/log.h"
 #include "windowing/WinSystem.h"
 
@@ -463,6 +464,22 @@ void CGUIControl::SetPosition(float posX, float posY)
 
     SetInvalid();
   }
+}
+
+void CGUIControl::BeginRoundedRegion()
+{
+  if (m_cornerRadius > 0.0f)
+  {
+    CServiceBroker::GetRenderSystem()->PushRoundedClip(
+        m_cornerRadius, m_width, m_height
+    );
+  }
+}
+
+void CGUIControl::EndRoundedRegion()
+{
+  if (m_cornerRadius > 0.0f)
+    CServiceBroker::GetRenderSystem()->PopRoundedClip();
 }
 
 bool CGUIControl::SetColorDiffuse(const GUIINFO::CGUIInfoColor &color)

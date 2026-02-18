@@ -184,6 +184,8 @@ public:
   virtual float GetYPosition() const;
   virtual float GetWidth() const;
   virtual float GetHeight() const;
+  void SetCornerRadius(float radius) { m_cornerRadius = radius; }
+  float GetCornerRadius() const { return m_cornerRadius; }
   virtual void AssignDepth();
 
   void MarkDirtyRegion(const unsigned int dirtyState = DIRTY_STATE_CONTROL);
@@ -340,6 +342,9 @@ protected:
    */
   virtual bool CanFocusFromPoint(const CPoint &point) const;
 
+  virtual void BeginRoundedRegion();
+  virtual void EndRoundedRegion();
+
   virtual bool UpdateColors(const CGUIListItem* item);
   virtual bool Animate(unsigned int currentTime);
   virtual bool CheckAnimation(ANIMATION_TYPE animType);
@@ -353,6 +358,7 @@ protected:
   float m_posY;
   float m_height;
   float m_width;
+  float m_cornerRadius = 0.0f;
   CRect m_hitRect;
   KODI::UTILS::COLOR::Color m_hitColor = 0xffffffff;
   KODI::GUILIB::GUIINFO::CGUIInfoColor m_diffuseColor;
