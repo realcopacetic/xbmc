@@ -70,6 +70,7 @@ public:
   void SetRenderFocusedLast(bool renderLast) { m_renderFocusedLast = renderLast; }
   void SetClipping(bool clip) { m_clipping = clip; }
   void SetTransformChildren(bool transform) { m_transformChildren = transform; }
+  void SetCornerRadius(float radius) { m_cornerRadius = radius; }
 
   void SaveStates(std::vector<CControlState> &states) override;
 
@@ -93,6 +94,7 @@ protected:
   bool m_renderFocusedLast;
   bool m_clipping{false};
   bool m_transformChildren{true};
+  float m_cornerRadius = 0.0f;
 private:
   typedef std::vector< std::vector<CGUIControl *> * > COLLECTORTYPE;
 

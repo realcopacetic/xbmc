@@ -553,6 +553,49 @@ void CRenderSystemGL::ResetScissors()
   SetScissors(CRect(0, 0, (float)m_width, (float)m_height));
 }
 
+void CRenderSystemGL::PushRoundedClip(float radius, const CRect& rect)
+{
+  m_roundedClipStack.push({radius, rect});
+}
+
+void CRenderSystemGL::PopRoundedClip()
+{
+  if (!m_roundedClipStack.empty())
+    m_roundedClipStack.pop();
+}
+
+bool CRenderSystemGL::IsRoundedClipActive()
+{
+  return !m_roundedClipStack.empty() && m_roundedClipStack.top().radius > 0.0f;
+}
+
+float CRenderSystemGL::GetCurrentClipRadius()
+{
+  return IsRoundedClipActive() ? m_roundedClipStack.top().radius : 0.0f;
+}
+
+void CRenderSystemGL::ApplyRoundedClipUniforms()
+{
+  if (m_method != ShaderMethodGL::SM_TEXTURE_ROUNDED || m_roundedClipStack.empty())
+    return;
+
+  if (!m_pShader[m_method]) return;
+
+  const auto& state = m_roundedClipStack.top();
+  glEnable(GL_BLEND);
+  GLuint prog = m_pShader[m_method]->ProgramHandle();
+  GLint locRect = glGetUniformLocation(prog, "m_clipRect");
+  GLint locRad = glGetUniformLocation(prog, "m_radius");
+
+  float glY = m_height - state.rect.y2;
+  if (locRect >= 0)
+    glUniform4f(locRect, state.rect.x1, glY, 
+                state.rect.Width(), state.rect.Height());
+
+  if (locRad >= 0)
+    glUniform1f(locRad, state.radius);
+}
+
 void CRenderSystemGL::SetDepthCulling(DepthCulling culling)
 {
   if (culling == DepthCulling::OFF)
@@ -789,6 +832,15 @@ void CRenderSystemGL::InitialiseShaders()
     m_pShader[ShaderMethodGL::SM_MULTI_BLENDCOLOR].reset();
     CLog::Log(LOGERROR, "GUI Shader gl_shader_frag_multi_blendcolor.glsl - compile and link failed");
   }
+
+  m_pShader[ShaderMethodGL::SM_TEXTURE_ROUNDED] = std::make_unique<CGLShader>(
+      "gl_shader_vert.glsl", "gl_shader_frag_texture_rounded.glsl", defines);
+  if (!m_pShader[ShaderMethodGL::SM_TEXTURE_ROUNDED]->CompileAndLink())
+  {
+    m_pShader[ShaderMethodGL::SM_TEXTURE_ROUNDED]->Free();
+    m_pShader[ShaderMethodGL::SM_TEXTURE_ROUNDED].reset();
+    CLog::Log(LOGERROR, "GUI Shader rounded texture - compile and link failed");
+  }
 }
 
 void CRenderSystemGL::ReleaseShaders()
@@ -824,6 +876,10 @@ void CRenderSystemGL::ReleaseShaders()
   if (m_pShader[ShaderMethodGL::SM_MULTI_BLENDCOLOR])
     m_pShader[ShaderMethodGL::SM_MULTI_BLENDCOLOR]->Free();
   m_pShader[ShaderMethodGL::SM_MULTI_BLENDCOLOR].reset();
+
+  if (m_pShader[ShaderMethodGL::SM_TEXTURE_ROUNDED])
+    m_pShader[ShaderMethodGL::SM_TEXTURE_ROUNDED]->Free();
+  m_pShader[ShaderMethodGL::SM_TEXTURE_ROUNDED].reset();
 }
 
 void CRenderSystemGL::EnableShader(ShaderMethodGL method)
