@@ -913,6 +913,7 @@ CGUIControl* CGUIControlFactory::Create(int parentID,
   bool renderFocusedLast = false;
   bool clipping = false;
   bool transformChildren = true;
+  float cornerRadius = 0.0f;
 
   CRect hitRect;
   CPoint camera;
@@ -1177,6 +1178,9 @@ CGUIControl* CGUIControlFactory::Create(int parentID,
   XMLUtils::GetBoolean(pControlNode, "renderfocusedlast", renderFocusedLast);
   XMLUtils::GetBoolean(pControlNode, "clipping", clipping);
   XMLUtils::GetBoolean(pControlNode, "transformchildren", transformChildren);
+  if (XMLUtils::GetFloat(pControlNode, "cornerradius", cornerRadius)) {
+    if (cornerRadius > 0.0f) clipping = true;
+  }
   XMLUtils::GetBoolean(pControlNode, "resetonlabelchange", resetOnLabelChange);
 
   XMLUtils::GetBoolean(pControlNode, "password", bPassword);
@@ -1271,6 +1275,7 @@ CGUIControl* CGUIControlFactory::Create(int parentID,
       }
       static_cast<CGUIControlGroup*>(control)->SetClipping(clipping);
       static_cast<CGUIControlGroup*>(control)->SetTransformChildren(transformChildren);
+      static_cast<CGUIControlGroup*>(control)->SetCornerRadius(cornerRadius);
 
       break;
     }

@@ -77,7 +77,12 @@ void CGUITextureGL::Begin(KODI::UTILS::COLOR::Color color)
   }
   else
   {
-    if (m_col[0] == 255 && m_col[1] == 255 && m_col[2] == 255 && m_col[3] == 255)
+    // OPT-IN: Check if rounded clip is active
+    if (m_renderSystem->IsRoundedClipActive())
+    {
+      m_renderSystem->EnableShader(ShaderMethodGL::SM_TEXTURE_ROUNDED);
+    }
+    else if (m_col[0] == 255 && m_col[1] == 255 && m_col[2] == 255 && m_col[3] == 255)
     {
       m_renderSystem->EnableShader(ShaderMethodGL::SM_TEXTURE_NOBLEND);
     }
@@ -110,6 +115,12 @@ void CGUITextureGL::End()
     GLint tex1Loc = m_renderSystem->ShaderGetCoord1();
     GLint uniColLoc = m_renderSystem->ShaderGetUniCol();
     GLint depthLoc = m_renderSystem->ShaderGetDepth();
+
+    if (m_renderSystem->IsRoundedClipActive()) 
+    {
+       CRenderSystemGL* glSystem = dynamic_cast<CRenderSystemGL*>(m_renderSystem);
+       glSystem->ApplyRoundedClipUniforms(); 
+    }
 
     GLuint VertexVBO;
     GLuint IndexVBO;
@@ -295,7 +306,17 @@ void CGUITextureGL::DrawQuad(const CRect& rect,
   } vertex[4];
 
   if (texture)
-    renderSystem->EnableShader(ShaderMethodGL::SM_TEXTURE);
+  {
+    if (renderSystem->IsRoundedClipActive())
+    {
+      renderSystem->EnableShader(ShaderMethodGL::SM_TEXTURE_ROUNDED);
+      renderSystem->ApplyRoundedClipUniforms();
+    }
+    else
+    {
+      renderSystem->EnableShader(ShaderMethodGL::SM_TEXTURE);
+    }
+  }
   else
     renderSystem->EnableShader(ShaderMethodGL::SM_DEFAULT);
 

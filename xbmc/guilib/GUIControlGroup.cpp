@@ -11,6 +11,7 @@
 #include "GUIMessage.h"
 #include "ServiceBroker.h"
 #include "input/mouse/MouseEvent.h"
+#include "rendering/RenderSystem.h"
 #include "windowing/WinSystem.h"
 
 #include <cassert>
@@ -46,6 +47,7 @@ CGUIControlGroup::CGUIControlGroup(const CGUIControlGroup &from)
   m_renderFocusedLast = from.m_renderFocusedLast;
   m_clipping = from.m_clipping;
   m_transformChildren = from.m_transformChildren;
+  m_cornerRadius = from.m_cornerRadius;
 
   // run through and add our controls
   for (auto *i : from.m_children)
@@ -115,17 +117,33 @@ void CGUIControlGroup::Process(unsigned int currentTime, CDirtyRegionList &dirty
 
 void CGUIControlGroup::Render()
 {
+  CRect aabb;
+  if (m_clipping)
+  {
+    const CRect localRect(m_posX, m_posY, m_posX + m_width, m_posY + m_height);
+    aabb = CServiceBroker::GetWinSystem()->GetGfxContext().GenerateAABB(localRect);
+  }
   CPoint pos(GetPosition());
   CServiceBroker::GetWinSystem()->GetGfxContext().SetOrigin(pos.x, pos.y);
   CRect prevScissors;
   if (m_clipping)
   {
     prevScissors = CServiceBroker::GetWinSystem()->GetGfxContext().GetScissors();
-    const CRect localRect(0.0f, 0.0f, m_width, m_height);
-    CRect aabb = CServiceBroker::GetWinSystem()->GetGfxContext().GenerateAABB(localRect);
     if (!prevScissors.IsEmpty())
       aabb.Intersect(prevScissors);
-    CServiceBroker::GetWinSystem()->GetGfxContext().SetScissors(aabb);
+    CRect scissorRect = aabb;
+    scissorRect.x1--; scissorRect.y1--;
+    scissorRect.x2++; scissorRect.y2++;
+    CServiceBroker::GetWinSystem()->GetGfxContext().SetScissors(scissorRect);
+    if (m_cornerRadius > 0.0f) {
+      float scaleX = (m_width > 0.0f) ? (aabb.Width() / m_width) : 1.0f;
+      float scaleY = (m_height > 0.0f) ? (aabb.Height() / m_height) : 1.0f;
+      float radiusToPass = m_cornerRadius * std::min(scaleX, scaleY);
+      
+      float maxRadius = std::min(aabb.Width(), aabb.Height()) / 2.0f;
+      if (radiusToPass > maxRadius) radiusToPass = maxRadius;
+      CServiceBroker::GetRenderSystem()->PushRoundedClip(radiusToPass, aabb);
+    }
   }
   const bool detach = !m_transformChildren && !m_transform.identity;
   if (detach)
@@ -159,6 +177,9 @@ void CGUIControlGroup::Render()
   CGUIControl::Render();
   if (m_clipping)
   {
+    if (m_cornerRadius > 0.0f) {
+      CServiceBroker::GetRenderSystem()->PopRoundedClip();
+    }
     if (prevScissors.IsEmpty())
       CServiceBroker::GetWinSystem()->GetGfxContext().ResetScissors();
     else

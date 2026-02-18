@@ -15,6 +15,7 @@
 
 #include <map>
 #include <memory>
+#include <stack>
 
 #include <fmt/format.h>
 
@@ -30,6 +31,7 @@ enum class ShaderMethodGL
   SM_FONTS_SHADER_CLIP,
   SM_TEXTURE_NOBLEND,
   SM_MULTI_BLENDCOLOR,
+  SM_TEXTURE_ROUNDED,
   SM_MAX
 };
 
@@ -56,6 +58,7 @@ private:
       {ShaderMethodGL::SM_FONTS_SHADER_CLIP, "fonts with vertex shader based clipping"},
       {ShaderMethodGL::SM_TEXTURE_NOBLEND, "texture no blending"},
       {ShaderMethodGL::SM_MULTI_BLENDCOLOR, "multi blend colour"},
+      {ShaderMethodGL::SM_TEXTURE_ROUNDED, "texture rounded"},
   });
 
   static_assert(static_cast<size_t>(ShaderMethodGL::SM_MAX) == ShaderMethodGLMap.size(),
@@ -89,6 +92,12 @@ public:
   CRect ClipRectToScissorRect(const CRect &rect) override;
   void SetScissors(const CRect &rect) override;
   void ResetScissors() override;
+
+  void PushRoundedClip(float radius, const CRect& rect) override;
+  void PopRoundedClip() override;
+  bool IsRoundedClipActive() override;
+  float GetCurrentClipRadius() override;
+  void ApplyRoundedClipUniforms();
 
   void SetDepthCulling(DepthCulling culling) override;
 
@@ -145,4 +154,13 @@ protected:
   std::map<ShaderMethodGL, std::unique_ptr<CGLShader>> m_pShader;
   ShaderMethodGL m_method = ShaderMethodGL::SM_DEFAULT;
   GLuint m_vertexArray = GL_NONE;
+
+  struct RoundedState {
+    float radius;
+    CRect rect;
+  };
+  std::stack<RoundedState> m_roundedClipStack;
+
+  GLint m_locRoundedClipRect = -1;
+  GLint m_locRoundedRadius = -1;
 };
