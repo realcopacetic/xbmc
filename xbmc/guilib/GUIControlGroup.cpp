@@ -47,7 +47,6 @@ CGUIControlGroup::CGUIControlGroup(const CGUIControlGroup &from)
   m_renderFocusedLast = from.m_renderFocusedLast;
   m_clipping = from.m_clipping;
   m_transformChildren = from.m_transformChildren;
-  m_cornerRadius = from.m_cornerRadius;
 
   // run through and add our controls
   for (auto *i : from.m_children)
@@ -117,6 +116,8 @@ void CGUIControlGroup::Process(unsigned int currentTime, CDirtyRegionList &dirty
 
 void CGUIControlGroup::Render()
 {
+  BeginRoundedRegion();
+  
   CRect aabb;
   if (m_clipping)
   {
@@ -135,15 +136,6 @@ void CGUIControlGroup::Render()
     scissorRect.x1--; scissorRect.y1--;
     scissorRect.x2++; scissorRect.y2++;
     CServiceBroker::GetWinSystem()->GetGfxContext().SetScissors(scissorRect);
-    if (m_cornerRadius > 0.0f) {
-      float scaleX = (m_width > 0.0f) ? (aabb.Width() / m_width) : 1.0f;
-      float scaleY = (m_height > 0.0f) ? (aabb.Height() / m_height) : 1.0f;
-      float radiusToPass = m_cornerRadius * std::min(scaleX, scaleY);
-      
-      float maxRadius = std::min(aabb.Width(), aabb.Height()) / 2.0f;
-      if (radiusToPass > maxRadius) radiusToPass = maxRadius;
-      CServiceBroker::GetRenderSystem()->PushRoundedClip(radiusToPass, aabb);
-    }
   }
   const bool detach = !m_transformChildren && !m_transform.identity;
   if (detach)
@@ -177,15 +169,14 @@ void CGUIControlGroup::Render()
   CGUIControl::Render();
   if (m_clipping)
   {
-    if (m_cornerRadius > 0.0f) {
-      CServiceBroker::GetRenderSystem()->PopRoundedClip();
-    }
     if (prevScissors.IsEmpty())
       CServiceBroker::GetWinSystem()->GetGfxContext().ResetScissors();
     else
       CServiceBroker::GetWinSystem()->GetGfxContext().SetScissors(prevScissors);
   }
   CServiceBroker::GetWinSystem()->GetGfxContext().RestoreOrigin();
+
+  EndRoundedRegion();
 }
 
 void CGUIControlGroup::RenderEx()

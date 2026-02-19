@@ -306,10 +306,14 @@ void CGUIImage::Render()
   if (!IsVisible())
     return;
 
+  BeginRoundedRegion();
+
   if (m_isTransitioning)
     m_textureNext->Render();
 
   m_textureCurrent->Render();
+
+  EndRoundedRegion();
 
   CGUIControl::Render();
 }
