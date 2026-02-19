@@ -1178,9 +1178,7 @@ CGUIControl* CGUIControlFactory::Create(int parentID,
   XMLUtils::GetBoolean(pControlNode, "renderfocusedlast", renderFocusedLast);
   XMLUtils::GetBoolean(pControlNode, "clipping", clipping);
   XMLUtils::GetBoolean(pControlNode, "transformchildren", transformChildren);
-  if (XMLUtils::GetFloat(pControlNode, "cornerradius", cornerRadius)) {
-    if (cornerRadius > 0.0f) clipping = true;
-  }
+  XMLUtils::GetFloat(pControlNode, "cornerradius", cornerRadius);
   XMLUtils::GetBoolean(pControlNode, "resetonlabelchange", resetOnLabelChange);
 
   XMLUtils::GetBoolean(pControlNode, "password", bPassword);
@@ -1273,9 +1271,10 @@ CGUIControl* CGUIControlFactory::Create(int parentID,
         static_cast<CGUIControlGroup*>(control)->SetDefaultControl(defaultControl, defaultAlways);
         static_cast<CGUIControlGroup*>(control)->SetRenderFocusedLast(renderFocusedLast);
       }
+      if (cornerRadius > 0.0f)
+        clipping = true;
       static_cast<CGUIControlGroup*>(control)->SetClipping(clipping);
       static_cast<CGUIControlGroup*>(control)->SetTransformChildren(transformChildren);
-      static_cast<CGUIControlGroup*>(control)->SetCornerRadius(cornerRadius);
 
       break;
     }
@@ -1774,6 +1773,7 @@ CGUIControl* CGUIControlFactory::Create(int parentID,
   // things that apply to all controls
   if (control)
   {
+    control->SetCornerRadius(cornerRadius);
     control->SetHitRect(hitRect, hitColor);
     control->SetVisibleCondition(visibleCondition, allowHiddenFocus);
     control->SetEnableCondition(enableCondition);

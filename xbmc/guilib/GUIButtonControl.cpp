@@ -118,6 +118,8 @@ void CGUIButtonControl::Process(unsigned int currentTime, CDirtyRegionList &dirt
 
 void CGUIButtonControl::Render()
 {
+  BeginRoundedRegion();
+
   if (CServiceBroker::GetWinSystem()->GetGfxContext().GetRenderOrder() ==
       RENDER_ORDER_FRONT_TO_BACK)
   {
@@ -130,6 +132,8 @@ void CGUIButtonControl::Render()
     m_imgNoFocus->Render();
     RenderText();
   }
+
+  EndRoundedRegion();
 
   CGUIControl::Render();
 }

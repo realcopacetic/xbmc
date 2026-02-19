@@ -47,7 +47,6 @@ CGUIControlGroup::CGUIControlGroup(const CGUIControlGroup &from)
   m_renderFocusedLast = from.m_renderFocusedLast;
   m_clipping = from.m_clipping;
   m_transformChildren = from.m_transformChildren;
-  m_cornerRadius = from.m_cornerRadius;
 
   // run through and add our controls
   for (auto *i : from.m_children)
